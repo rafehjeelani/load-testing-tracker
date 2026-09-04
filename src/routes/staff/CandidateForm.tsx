@@ -14,10 +14,13 @@ import { Badge, Button } from "../../components/ui";
 import { Logo } from "../../components/Logo";
 import IssuesSection from "../../components/IssuesSection";
 import StaffStepRow from "./StaffStepRow";
+import { useAuth } from "./AuthContext";
 
 export default function CandidateForm() {
   const { candidateId } = useParams<{ candidateId: string }>();
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const homePath = profile ? `/${profile.role}` : "/";
   const [steps, setSteps] = useState<Step[] | null>(null);
   const [full, setFull] = useState<CandidateFull | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -88,7 +91,7 @@ export default function CandidateForm() {
     <div className="min-h-screen bg-bg text-text">
       <div className="border-b border-border bg-surface">
         <div className="max-w-[1240px] mx-auto px-8 h-[52px] flex items-center justify-between">
-          <button onClick={() => navigate(0)} className="flex items-center gap-2 cursor-pointer">
+          <button onClick={() => navigate(homePath)} className="flex items-center gap-2 cursor-pointer">
             <Logo />
             <span className="font-semibold text-sm">Load Testing Tracker</span>
           </button>
