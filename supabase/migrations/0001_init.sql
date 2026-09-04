@@ -11,6 +11,7 @@
 -- documented trade-off rather than an accident.
 
 create extension if not exists pgcrypto;
+create extension if not exists citext;
 
 -- ---------------------------------------------------------------------
 -- profiles (admins & moderators)
@@ -19,6 +20,7 @@ create table profiles (
   id uuid primary key references auth.users (id) on delete cascade,
   role text not null check (role in ('admin', 'moderator')),
   full_name text not null,
+  email citext not null,
   created_at timestamptz not null default now()
 );
 
@@ -70,8 +72,6 @@ create table candidates (
   created_at timestamptz not null default now(),
   unique (test_id, email)
 );
-
-create extension if not exists citext;
 
 -- ---------------------------------------------------------------------
 -- step_reports (one row per candidate per step; the 3-way outcome)

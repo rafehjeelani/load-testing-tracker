@@ -5,7 +5,7 @@ import { addIssue, submitForm, upsertStepReport, uploadEvidence } from "../../li
 import { Badge, Button } from "../../components/ui";
 import { Logo } from "../../components/Logo";
 import StepRow from "./StepRow";
-import IssuesSection from "./IssuesSection";
+import IssuesSection from "../../components/IssuesSection";
 import type { Outcome } from "../../types";
 
 export default function StepForm() {

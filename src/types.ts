@@ -44,6 +44,7 @@ export interface Profile {
   id: string;
   role: StaffRole;
   full_name: string;
+  email: string;
 }
 
 export interface Test {

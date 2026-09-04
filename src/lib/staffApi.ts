@@ -12,9 +12,12 @@ import type {
 
 export class StaffApiError extends Error {}
 
-function unwrap<T>(result: { data: T | null; error: { message: string } | null }): T {
-  if (result.error) throw new StaffApiError(result.error.message);
-  return result.data as T;
+async function unwrap<T>(
+  query: PromiseLike<{ data: T | null; error: { message: string } | null }>,
+): Promise<T> {
+  const { data, error } = await query;
+  if (error) throw new StaffApiError(error.message);
+  return data as T;
 }
 
 // --- Auth ---
@@ -35,7 +38,7 @@ export async function getCurrentProfile(): Promise<Profile | null> {
   if (!user) return null;
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, role, full_name")
+    .select("id, role, full_name, email")
     .eq("id", user.id)
     .single();
   if (error) return null;
@@ -44,9 +47,9 @@ export async function getCurrentProfile(): Promise<Profile | null> {
 
 // --- Tests ---
 
-export function listTests() {
-  return unwrap<Test[]>(
-    supabase.from("tests").select("id, name, slug, created_at").order("created_at", { ascending: false }) as never,
+export function listTests(): Promise<Test[]> {
+  return unwrap(
+    supabase.from("tests").select("id, name, slug, created_at").order("created_at", { ascending: false }),
   );
 }
 
@@ -67,13 +70,13 @@ export async function createTest(name: string): Promise<Test> {
 
 // --- Steps ---
 
-export function listSteps(testId: string) {
-  return unwrap<Step[]>(
+export function listSteps(testId: string): Promise<Step[]> {
+  return unwrap(
     supabase
       .from("steps")
       .select("id, name, order_index, required")
       .eq("test_id", testId)
-      .order("order_index") as never,
+      .order("order_index"),
   );
 }
 
@@ -88,7 +91,7 @@ export async function addStep(testId: string, name: string, orderIndex: number, 
 
 export function listModerators(): Promise<Moderator[]> {
   return unwrap(
-    supabase.from("profiles").select("id, full_name, email:id").eq("role", "moderator") as never,
+    supabase.from("profiles").select("id, full_name, email").eq("role", "moderator"),
   );
 }
 

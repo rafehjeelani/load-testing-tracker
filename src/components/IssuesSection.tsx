@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
-import type { Issue, Step } from "../../types";
-import { Badge, Button, FieldLabel, Textarea } from "../../components/ui";
+import type { Issue, Step } from "../types";
+import { Badge, Button, FieldLabel, Textarea } from "./ui";
 
 const OTHER = "__other__";
 
@@ -14,15 +14,20 @@ interface Props {
     evidencePath: string,
   ) => Promise<void>;
   onUpload: (file: File) => Promise<string>;
+  /** When provided, a "Download" action is shown next to each logged issue's
+   *  evidence (staff views only -- candidates never need to download their
+   *  own upload). */
+  onDownload?: (evidencePath: string) => Promise<void>;
 }
 
-export default function IssuesSection({ steps, issues, onAdd, onUpload }: Props) {
+export default function IssuesSection({ steps, issues, onAdd, onUpload, onDownload }: Props) {
   const [stepChoice, setStepChoice] = useState(steps[0]?.id ?? OTHER);
   const [customStepName, setCustomStepName] = useState("");
   const [comment, setComment] = useState("");
   const [evidencePath, setEvidencePath] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -52,6 +57,16 @@ export default function IssuesSection({ steps, issues, onAdd, onUpload }: Props)
     }
   }
 
+  async function handleDownload(issue: Issue) {
+    if (!onDownload) return;
+    setDownloadingId(issue.id);
+    try {
+      await onDownload(issue.evidence_path);
+    } finally {
+      setDownloadingId(null);
+    }
+  }
+
   function stepName(stepId: string | null, custom: string | null) {
     if (custom) return custom;
     return steps.find((s) => s.id === stepId)?.name ?? "Unknown step";
@@ -73,13 +88,30 @@ export default function IssuesSection({ steps, issues, onAdd, onUpload }: Props)
             </span>
           </div>
           <div className="text-[13px] mb-2">{issue.comment}</div>
-          <div className="flex items-center gap-1.5 text-[12px] text-text-2">
-            <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path d="M12 3v13" />
-              <path d="M7 8l5-5 5 5" />
-              <path d="M5 21h14" />
-            </svg>
-            {issue.evidence_path.split("/").pop()}
+          <div className="flex items-center justify-between gap-2">
+            <span className="flex items-center gap-1.5 text-[12px] text-text-2">
+              <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path d="M12 3v13" />
+                <path d="M7 8l5-5 5 5" />
+                <path d="M5 21h14" />
+              </svg>
+              {issue.evidence_path.split("/").pop()}
+            </span>
+            {onDownload && (
+              <button
+                type="button"
+                onClick={() => handleDownload(issue)}
+                disabled={downloadingId === issue.id}
+                className="flex items-center gap-1.5 text-[12px] text-accent font-semibold cursor-pointer"
+              >
+                <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path d="M12 3v13" />
+                  <path d="M17 11l-5 5-5-5" />
+                  <path d="M5 21h14" />
+                </svg>
+                {downloadingId === issue.id ? "Preparing…" : "Download"}
+              </button>
+            )}
           </div>
         </div>
       ))}
