@@ -118,6 +118,11 @@ export async function addStep(testId: string, name: string, orderIndex: number, 
   if (error) throw new StaffApiError(error.message);
 }
 
+export async function updateStep(stepId: string, patch: { name?: string; required?: boolean }) {
+  const { error } = await supabase.from("steps").update(patch).eq("id", stepId);
+  if (error) throw new StaffApiError(error.message);
+}
+
 // --- Moderators ---
 
 export function listModerators(): Promise<Moderator[]> {

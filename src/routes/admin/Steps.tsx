@@ -1,9 +1,57 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useParams } from "react-router-dom";
-import { addStep, getTest, listSteps } from "../../lib/staffApi";
+import { addStep, getTest, listSteps, updateStep } from "../../lib/staffApi";
 import type { Step, Test } from "../../types";
-import { Badge, Button } from "../../components/ui";
+import { Button } from "../../components/ui";
 import { TopNav } from "../staff/TopNav";
+
+function StepRow({ step, index, onSaved }: { step: Step; index: number; onSaved: () => void }) {
+  const [name, setName] = useState(step.name);
+
+  async function saveName() {
+    if (name.trim() === step.name || !name.trim()) {
+      setName(step.name);
+      return;
+    }
+    await updateStep(step.id, { name: name.trim() });
+    onSaved();
+  }
+
+  async function toggleRequired() {
+    await updateStep(step.id, { required: !step.required });
+    onSaved();
+  }
+
+  return (
+    <div className="flex items-center gap-3 px-4 py-3">
+      <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth={2}>
+        <circle cx="9" cy="6" r="1.2" />
+        <circle cx="9" cy="12" r="1.2" />
+        <circle cx="9" cy="18" r="1.2" />
+        <circle cx="15" cy="6" r="1.2" />
+        <circle cx="15" cy="12" r="1.2" />
+        <circle cx="15" cy="18" r="1.2" />
+      </svg>
+      <span className="font-mono-tabular text-text-3 text-[12.5px] w-5">{index + 1}</span>
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onBlur={saveName}
+        className="font-semibold text-[13.5px] flex-1 bg-transparent border border-transparent rounded-[6px] px-2 py-1 -mx-2 hover:border-border focus:border-accent focus:bg-surface-2 outline-none"
+      />
+      <button
+        type="button"
+        onClick={toggleRequired}
+        className={`px-2.5 py-0.5 rounded-full text-[12px] font-semibold cursor-pointer ${
+          step.required ? "bg-surface-2 text-text-2" : "bg-accent-soft text-accent"
+        }`}
+        title="Click to toggle"
+      >
+        {step.required ? "Required" : "Optional"}
+      </button>
+    </div>
+  );
+}
 
 export default function Steps() {
   const { testId } = useParams<{ testId: string }>();
@@ -49,23 +97,12 @@ export default function Steps() {
         ]}
       />
       <div className="max-w-[1240px] mx-auto px-8 py-7">
-        <h1 className="text-[22px] font-bold m-0 mb-5">{test.name} — Steps</h1>
+        <h1 className="text-[22px] font-bold m-0 mb-1">{test.name} — Steps</h1>
+        <div className="text-[12.5px] text-text-3 mb-5">Click a step's name or Required/Optional to edit it</div>
 
         <div className="bg-surface border border-border rounded-[10px] divide-y divide-border-soft mb-4">
           {steps.map((s, i) => (
-            <div key={s.id} className="flex items-center gap-3 px-4 py-3">
-              <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth={2}>
-                <circle cx="9" cy="6" r="1.2" />
-                <circle cx="9" cy="12" r="1.2" />
-                <circle cx="9" cy="18" r="1.2" />
-                <circle cx="15" cy="6" r="1.2" />
-                <circle cx="15" cy="12" r="1.2" />
-                <circle cx="15" cy="18" r="1.2" />
-              </svg>
-              <span className="font-mono-tabular text-text-3 text-[12.5px] w-5">{i + 1}</span>
-              <span className="font-semibold text-[13.5px] flex-1">{s.name}</span>
-              <Badge variant={s.required ? "neutral" : "accent"}>{s.required ? "Required" : "Optional"}</Badge>
-            </div>
+            <StepRow key={s.id} step={s} index={i} onSaved={load} />
           ))}
           {steps.length === 0 && <div className="px-4 py-6 text-center text-text-3">No steps configured yet.</div>}
         </div>
