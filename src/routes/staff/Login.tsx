@@ -7,7 +7,7 @@ import { Logo } from "../../components/Logo";
 import type { StaffRole } from "../../types";
 
 export default function Login({ role }: { role: StaffRole }) {
-  const { profile, refresh } = useAuth();
+  const { profile, refresh, authError } = useAuth();
   const navigate = useNavigate();
   const [mode, setMode] = useState<"sign-in" | "reset">("sign-in");
   const [email, setEmail] = useState("");
@@ -29,7 +29,8 @@ export default function Login({ role }: { role: StaffRole }) {
       const p = await refresh();
       if (!p) {
         setError(
-          "Signed in, but this account doesn't have an admin or moderator profile set up yet. Contact whoever manages this app.",
+          authError ??
+            "Signed in, but this account doesn't have an admin or moderator profile set up yet. Contact whoever manages this app.",
         );
         return;
       }

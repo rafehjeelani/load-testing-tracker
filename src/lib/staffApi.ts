@@ -43,20 +43,28 @@ export async function signOut() {
 }
 
 export async function getCurrentProfile(): Promise<Profile | null> {
+  // getSession() reads the session that signInWithPassword() already
+  // stored locally, synchronously -- unlike getUser(), it doesn't make its
+  // own round trip to re-verify the JWT server-side, so it can't lag behind
+  // a sign-in that just happened a moment ago.
   const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return null;
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session?.user) return null;
   const { data, error } = await supabase
     .from("profiles")
     .select("id, role, full_name, email")
-    .eq("id", user.id)
+    .eq("id", session.user.id)
     .single();
   // A missing row (not an admin/moderator yet) is a normal, silent "not set
   // up" state -- anything else (RLS denial, network error, etc.) is a real
   // failure the caller should be able to show to the user.
   if (error) {
-    if (error.code === "PGRST116") return null; // "no rows" from .single()
+    if (error.code === "PGRST116") {
+      throw new StaffApiError(
+        `Signed in as ${session.user.email}, but no admin/moderator profile exists for this account yet.`,
+      );
+    }
     throw new StaffApiError(`Signed in, but couldn't load your account (${error.message}).`);
   }
   return data as Profile;
