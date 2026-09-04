@@ -6,6 +6,7 @@ import Home from "./routes/Home";
 import { AuthProvider } from "./routes/staff/AuthContext";
 import RequireRole from "./routes/staff/RequireRole";
 import Login from "./routes/staff/Login";
+import ResetPassword from "./routes/staff/ResetPassword";
 import CandidateForm from "./routes/staff/CandidateForm";
 import TestList from "./routes/admin/TestList";
 import CreateTest from "./routes/admin/CreateTest";
@@ -30,6 +31,7 @@ export default function App() {
     <AuthProvider>
       <Routes>
         <Route path="/" element={<Home />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
 
         <Route path="/t/:testSlug" element={<CandidateLayout />}>
           <Route index element={<EmailGate />} />

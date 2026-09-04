@@ -27,6 +27,17 @@ export async function signIn(email: string, password: string) {
   if (error) throw new StaffApiError(error.message);
 }
 
+export async function requestPasswordReset(email: string) {
+  const redirectTo = `${window.location.origin}${import.meta.env.BASE_URL}reset-password`;
+  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+  if (error) throw new StaffApiError(error.message);
+}
+
+export async function updatePassword(newPassword: string) {
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw new StaffApiError(error.message);
+}
+
 export async function signOut() {
   await supabase.auth.signOut();
 }
