@@ -103,6 +103,18 @@ create table issues (
 );
 
 -- ---------------------------------------------------------------------
+-- Baseline grants: RLS only ever *restricts* what a role can already
+-- touch -- it does not grant access by itself. Tables created via raw SQL
+-- (as opposed to Supabase's table editor) don't automatically pick up
+-- table-level privileges for `authenticated`, so without this every query
+-- from a signed-in admin/moderator fails with "permission denied for
+-- table ..." before RLS is even evaluated. The actual per-row restriction
+-- still comes entirely from the policies below.
+-- ---------------------------------------------------------------------
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on profiles, tests, steps, candidates, step_reports, issues to authenticated;
+
+-- ---------------------------------------------------------------------
 -- Row Level Security: admins/moderators (authenticated), scoped by role
 -- ---------------------------------------------------------------------
 alter table profiles enable row level security;
