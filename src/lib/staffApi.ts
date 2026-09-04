@@ -52,7 +52,13 @@ export async function getCurrentProfile(): Promise<Profile | null> {
     .select("id, role, full_name, email")
     .eq("id", user.id)
     .single();
-  if (error) return null;
+  // A missing row (not an admin/moderator yet) is a normal, silent "not set
+  // up" state -- anything else (RLS denial, network error, etc.) is a real
+  // failure the caller should be able to show to the user.
+  if (error) {
+    if (error.code === "PGRST116") return null; // "no rows" from .single()
+    throw new StaffApiError(`Signed in, but couldn't load your account (${error.message}).`);
+  }
   return data as Profile;
 }
 
@@ -110,6 +116,15 @@ export function listModerators(): Promise<Moderator[]> {
   return unwrap(
     supabase.from("profiles").select("id, full_name, email").eq("role", "moderator"),
   );
+}
+
+/** Admin-only: invites a new moderator by email via the create-moderator edge function. */
+export async function inviteModerator(email: string, fullName: string) {
+  const { data, error } = await supabase.functions.invoke("create-moderator", {
+    body: { email, full_name: fullName },
+  });
+  if (error) throw new StaffApiError(error.message);
+  if (data?.error) throw new StaffApiError(data.error);
 }
 
 /** The tests where the signed-in moderator has at least one assigned candidate. */

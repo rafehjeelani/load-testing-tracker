@@ -26,7 +26,17 @@ export default function Login({ role }: { role: StaffRole }) {
     setError(null);
     try {
       await signIn(email.trim(), password);
-      await refresh();
+      const p = await refresh();
+      if (!p) {
+        setError(
+          "Signed in, but this account doesn't have an admin or moderator profile set up yet. Contact whoever manages this app.",
+        );
+        return;
+      }
+      if (p.role !== role) {
+        setError(`This account is set up as a ${p.role}, not ${role === "admin" ? "an" : "a"} ${role}. Try the ${p.role} login instead.`);
+        return;
+      }
       navigate(`/${role}`);
     } catch (err) {
       setError(err instanceof StaffApiError ? err.message : "Sign in failed. Check your details and try again.");
