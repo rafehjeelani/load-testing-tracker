@@ -53,6 +53,12 @@ export function listTests(): Promise<Test[]> {
   );
 }
 
+export function getTest(testId: string): Promise<Test> {
+  return unwrap(
+    supabase.from("tests").select("id, name, slug, created_at").eq("id", testId).single(),
+  );
+}
+
 export async function createTest(name: string): Promise<Test> {
   const slug = name
     .toLowerCase()
@@ -95,26 +101,51 @@ export function listModerators(): Promise<Moderator[]> {
   );
 }
 
+/** The tests where the signed-in moderator has at least one assigned candidate. */
+export async function listTestsForCurrentModerator(): Promise<Test[]> {
+  const { data: userData } = await supabase.auth.getUser();
+  if (!userData.user) return [];
+  const { data: rows, error } = await supabase
+    .from("candidates")
+    .select("test_id")
+    .eq("moderator_id", userData.user.id);
+  if (error) throw new StaffApiError(error.message);
+  const testIds = [...new Set((rows ?? []).map((r) => r.test_id))];
+  if (testIds.length === 0) return [];
+  const { data: tests, error: testErr } = await supabase
+    .from("tests")
+    .select("id, name, slug, created_at")
+    .in("id", testIds);
+  if (testErr) throw new StaffApiError(testErr.message);
+  return tests ?? [];
+}
+
 // --- Candidates ---
 
 export async function listCandidates(testId: string): Promise<CandidateListItem[]> {
   const { data: candidates, error: candErr } = await supabase
     .from("candidates")
-    .select("id, email, moderator_id, submitted")
+    .select("id, email, moderator_id, submitted, submitted_at")
     .eq("test_id", testId)
     .order("email");
   if (candErr) throw new StaffApiError(candErr.message);
 
   const { data: reports, error: repErr } = await supabase
     .from("step_reports")
-    .select("candidate_id, step_id, outcome, saved_at")
+    .select("candidate_id, step_id, outcome, saved_at, comment, evidence_path, updated_at")
     .in("candidate_id", (candidates ?? []).map((c) => c.id));
   if (repErr) throw new StaffApiError(repErr.message);
 
   const byCandidate = new Map<string, CandidateListItem["step_outcomes"]>();
   for (const r of reports ?? []) {
     const existing = byCandidate.get(r.candidate_id) ?? {};
-    existing[r.step_id] = { outcome: r.outcome, saved_at: r.saved_at };
+    existing[r.step_id] = {
+      outcome: r.outcome,
+      saved_at: r.saved_at,
+      comment: r.comment,
+      evidence_path: r.evidence_path,
+      updated_at: r.updated_at,
+    };
     byCandidate.set(r.candidate_id, existing);
   }
 
@@ -123,6 +154,7 @@ export async function listCandidates(testId: string): Promise<CandidateListItem[
     email: c.email,
     moderator_id: c.moderator_id,
     submitted: c.submitted,
+    submitted_at: c.submitted_at,
     step_outcomes: byCandidate.get(c.id) ?? {},
   }));
 }
@@ -138,6 +170,23 @@ export async function assignModerator(candidateId: string, moderatorId: string |
     .update({ moderator_id: moderatorId })
     .eq("id", candidateId);
   if (error) throw new StaffApiError(error.message);
+}
+
+/** All issues logged across every candidate in a test, with their email attached -- used for CSV export. */
+export async function listIssuesForTest(
+  testId: string,
+): Promise<(Issue & { candidate_email: string })[]> {
+  const { data, error } = await supabase
+    .from("issues")
+    .select("id, step_id, custom_step_name, comment, evidence_path, created_at, candidates!inner(email, test_id)")
+    .eq("candidates.test_id", testId);
+  if (error) throw new StaffApiError(error.message);
+  return (data ?? []).map((row) => {
+    const { candidates, ...issue } = row as unknown as Issue & {
+      candidates: { email: string };
+    };
+    return { ...issue, candidate_email: candidates.email };
+  });
 }
 
 export async function getCandidateFull(candidateId: string): Promise<CandidateFull> {

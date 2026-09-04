@@ -66,7 +66,18 @@ export interface CandidateListItem {
   email: string;
   moderator_id: string | null;
   submitted: boolean;
-  step_outcomes: Record<string, { outcome: Outcome | null; saved_at: string | null }>; // keyed by step_id
+  submitted_at: string | null;
+  // keyed by step_id
+  step_outcomes: Record<
+    string,
+    {
+      outcome: Outcome | null;
+      saved_at: string | null;
+      comment: string | null;
+      evidence_path: string | null;
+      updated_at: string | null;
+    }
+  >;
 }
 
 export interface CandidateFull {
