@@ -1,0 +1,134 @@
+@import "tailwindcss";
+
+/* Design tokens ported 1:1 from the approved mockup, so the real app
+   matches it exactly in both light and dark themes. */
+:root {
+  --bg: #f1f3f7;
+  --surface: #ffffff;
+  --surface-2: #f7f8fa;
+  --border: #dde1e9;
+  --border-soft: #e9ebf0;
+  --text: #1a2233;
+  --text-2: #5b6472;
+  --text-3: #8a92a3;
+
+  --accent: #3d63c9;
+  --accent-2: #2c4a9e;
+  --accent-soft: #eaf0fc;
+  --on-accent: #ffffff;
+
+  --success: #1f8f5f;
+  --success-soft: #e7f5ee;
+
+  --warning: #a3660c;
+  --warning-soft: #fbf1de;
+  --warning-border: #ecd39c;
+
+  --danger: #b4403f;
+  --danger-soft: #fbeaea;
+  --danger-border: #eec2c1;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12151c;
+    --surface: #1a1e27;
+    --surface-2: #20242e;
+    --border: #2c313c;
+    --border-soft: #262a33;
+    --text: #e7e9ee;
+    --text-2: #a4abb8;
+    --text-3: #737b8a;
+
+    --accent: #7ea1f5;
+    --accent-2: #a9c1f8;
+    --accent-soft: #202b42;
+    --on-accent: #12151c;
+
+    --success: #4fbf8b;
+    --success-soft: #163427;
+
+    --warning: #e2ab53;
+    --warning-soft: #34290f;
+    --warning-border: #5c4820;
+
+    --danger: #e2807f;
+    --danger-soft: #38191a;
+    --danger-border: #5c2c2c;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12151c;
+  --surface: #1a1e27;
+  --surface-2: #20242e;
+  --border: #2c313c;
+  --border-soft: #262a33;
+  --text: #e7e9ee;
+  --text-2: #a4abb8;
+  --text-3: #737b8a;
+
+  --accent: #7ea1f5;
+  --accent-2: #a9c1f8;
+  --accent-soft: #202b42;
+  --on-accent: #12151c;
+
+  --success: #4fbf8b;
+  --success-soft: #163427;
+
+  --warning: #e2ab53;
+  --warning-soft: #34290f;
+  --warning-border: #5c4820;
+
+  --danger: #e2807f;
+  --danger-soft: #38191a;
+  --danger-border: #5c2c2c;
+}
+
+/* Tailwind v4 theme: alias utility color tokens to the CSS vars above, so
+   classes like bg-accent / text-warning / border-danger-border work and
+   stay in sync with the light/dark values. */
+@theme {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-border-soft: var(--border-soft);
+  --color-text: var(--text);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+
+  --color-accent: var(--accent);
+  --color-accent-2: var(--accent-2);
+  --color-accent-soft: var(--accent-soft);
+  --color-on-accent: var(--on-accent);
+
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-border: var(--warning-border);
+
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-border: var(--danger-border);
+
+  --font-sans: "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+}
+.font-mono-tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
