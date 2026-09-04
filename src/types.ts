@@ -1,4 +1,5 @@
 export type Outcome = "without_issues" | "with_issues" | "unable";
+export type StaffRole = "admin" | "moderator";
 
 export interface Step {
   id: string;
@@ -33,6 +34,49 @@ export interface CandidateState {
     submitted_at: string | null;
   };
   steps: Step[];
+  step_reports: StepReport[];
+  issues: Issue[];
+}
+
+// --- Staff (admin/moderator) side ---
+
+export interface Profile {
+  id: string;
+  role: StaffRole;
+  full_name: string;
+}
+
+export interface Test {
+  id: string;
+  name: string;
+  slug: string;
+  created_at: string;
+}
+
+export interface Moderator {
+  id: string;
+  full_name: string;
+  email: string;
+}
+
+/** A candidate row as listed in the Candidates table, with one outcome per step. */
+export interface CandidateListItem {
+  id: string;
+  email: string;
+  moderator_id: string | null;
+  submitted: boolean;
+  step_outcomes: Record<string, { outcome: Outcome | null; saved_at: string | null }>; // keyed by step_id
+}
+
+export interface CandidateFull {
+  candidate: {
+    id: string;
+    test_id: string;
+    email: string;
+    moderator_id: string | null;
+    submitted: boolean;
+    submitted_at: string | null;
+  };
   step_reports: StepReport[];
   issues: Issue[];
 }
