@@ -1,5 +1,6 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import { Logo } from "../../components/Logo";
+import { signOut } from "../../lib/staffApi";
 
 export interface NavTab {
   label: string;
@@ -18,6 +19,15 @@ export function TopNav({
   suffix?: string;
   tabs?: NavTab[];
 }) {
+  const navigate = useNavigate();
+
+  async function handleLogout() {
+    await signOut();
+    // brandTo is always the role's home route ("/admin" or "/moderator"),
+    // which doubles as the login path's prefix.
+    navigate(`${brandTo}/login`, { replace: true });
+  }
+
   return (
     <div className="sticky top-0 z-30 border-b border-border bg-surface">
       <div className="max-w-[1240px] mx-auto px-8 h-[52px] flex items-center gap-2">
@@ -48,6 +58,19 @@ export function TopNav({
             ))}
           </nav>
         )}
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="ml-auto shrink-0 flex items-center gap-1.5 text-[13px] text-text-2 hover:text-danger cursor-pointer"
+          title="Log out"
+        >
+          <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+            <path d="M16 17l5-5-5-5" />
+            <path d="M21 12H9" />
+          </svg>
+          Logout
+        </button>
       </div>
     </div>
   );
