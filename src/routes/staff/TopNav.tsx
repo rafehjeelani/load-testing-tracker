@@ -34,7 +34,7 @@ export function TopNav({
         <NavLink to={brandTo} className="flex items-center gap-2 mr-7 shrink-0">
           <Logo size={20} />
           <span className="font-semibold text-sm">
-            Load Testing Tracker
+            Crowd Test Tracker
             {suffix && <span className="text-text-3 font-normal"> · {suffix}</span>}
           </span>
         </NavLink>

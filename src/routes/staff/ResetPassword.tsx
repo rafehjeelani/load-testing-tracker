@@ -49,7 +49,7 @@ export default function ResetPassword() {
       <Card className="w-full max-w-[380px] p-8">
         <div className="flex flex-col items-center gap-2.5 mb-6">
           <Logo size={30} />
-          <span className="font-semibold text-[15px] text-center">Load Testing Tracker</span>
+          <span className="font-semibold text-[15px] text-center">Crowd Test Tracker</span>
         </div>
 
         {done ? (

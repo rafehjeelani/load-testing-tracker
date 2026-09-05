@@ -67,7 +67,7 @@ export default function Login({ role }: { role: StaffRole }) {
   }
 
   const title = role === "admin" ? "Admin Sign In" : "Moderator Sign In";
-  const wordmark = role === "admin" ? "Load Testing Tracker" : "Load Testing Tracker · Moderator";
+  const wordmark = role === "admin" ? "Crowd Test Tracker" : "Crowd Test Tracker · Moderator";
 
   return (
     <div className="min-h-screen bg-bg flex items-center justify-center px-6">

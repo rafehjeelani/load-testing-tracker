@@ -6,7 +6,7 @@ export default function Home() {
       <div className="max-w-[520px] text-center">
         <div className="flex items-center justify-center gap-2 mb-3">
           <Logo size={24} />
-          <span className="font-bold text-[19px]">Load Testing Tracker</span>
+          <span className="font-bold text-[19px]">Crowd Test Tracker</span>
         </div>
         <p className="text-text-2 text-sm leading-relaxed">
           Candidates reach their self-report form at a link like{" "}

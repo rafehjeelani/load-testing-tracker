@@ -1,4 +1,4 @@
-# Load Testing Tracker
+# Crowd Test Tracker
 
 A small app for running Talview load tests: candidates self-report how each step of a real test session went, on their own device, while a separate admin/moderator console tracks progress, flags issues, and reports on the results.
 

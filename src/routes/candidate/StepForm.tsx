@@ -147,7 +147,7 @@ export default function StepForm() {
       <div className="sticky top-0 z-30 border-b border-border bg-surface">
         <div className="max-w-[760px] mx-auto px-6 h-[52px] flex items-center gap-2">
           <Logo />
-          <span className="font-semibold text-sm">Load Testing Tracker</span>
+          <span className="font-semibold text-sm">Crowd Test Tracker</span>
         </div>
       </div>
 

@@ -155,7 +155,7 @@ export default function CandidateForm() {
         <div className="max-w-[1240px] mx-auto px-8 h-[52px] flex items-center justify-between">
           <button onClick={() => navigate(homePath)} className="flex items-center gap-2 cursor-pointer">
             <Logo />
-            <span className="font-semibold text-sm">Load Testing Tracker</span>
+            <span className="font-semibold text-sm">Crowd Test Tracker</span>
           </button>
           <button
             onClick={() => navigate(-1)}
