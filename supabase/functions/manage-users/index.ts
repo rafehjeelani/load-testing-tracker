@@ -1,6 +1,6 @@
 // Supabase Edge Function: manage-users
 //
-// Two admin-only operations that require the service role (never available
+// Admin-only operations that require the service role (never available
 // client-side, since it bypasses RLS entirely):
 //   - { action: "delete", user_id }               -- deletes the auth user
 //     (profiles row cascades via `on delete cascade`). Fails with a clear
@@ -9,10 +9,21 @@
 //   - { action: "update_email", user_id, email }  -- changes the user's
 //     Supabase Auth login email AND the profiles.email column together, so
 //     the two never drift apart.
+//   - { action: "generate_link", type: "invite" | "recovery", email,
+//       full_name?, role? }                       -- generates the same
+//     invite/reset link Supabase's own emails would contain, but *without*
+//     sending an email. This is the one supported way to sidestep GoTrue's
+//     built-in email rate limit (a handful of sends per hour on the
+//     default/no-custom-SMTP setup): the admin copies the link from the UI
+//     and shares it directly (Slack, WhatsApp, etc). "invite" also creates
+//     the auth user + profiles row, same as create-moderator does when it
+//     sends its own email. "recovery" targets an existing user.
 //
 // Deploy via the Supabase dashboard: Edge Functions -> Create a new
 // function -> name it "manage-users" -> paste this file's contents.
 import { createClient } from "npm:@supabase/supabase-js@2";
+
+const APP_RESET_PASSWORD_URL = "https://rafehjeelani.github.io/load-testing-tracker/reset-password";
 
 // Accounts that can never be deleted through this function, regardless of
 // who's asking -- a permanent safeguard against locking the whole org out
@@ -103,6 +114,48 @@ Deno.serve(async (req) => {
       if (profileErr) return json({ error: profileErr.message }, 400);
 
       return json({ ok: true });
+    }
+
+    if (body.action === "generate_link") {
+      const { type, email, full_name, role } = body;
+      if (!email) return json({ error: "email is required" }, 400);
+      if (type !== "invite" && type !== "recovery") {
+        return json({ error: "type must be 'invite' or 'recovery'" }, 400);
+      }
+
+      if (type === "invite") {
+        if (!full_name) return json({ error: "full_name is required" }, 400);
+        const targetRole = role ?? "moderator";
+        if (targetRole !== "admin" && targetRole !== "moderator") {
+          return json({ error: "role must be 'admin' or 'moderator'" }, 400);
+        }
+
+        const { data, error } = await adminClient.auth.admin.generateLink({
+          type: "invite",
+          email,
+          options: { redirectTo: APP_RESET_PASSWORD_URL },
+        });
+        if (error || !data?.user) return json({ error: error?.message ?? "Could not generate that link" }, 400);
+
+        const { error: profileErr } = await adminClient.from("profiles").insert({
+          id: data.user.id,
+          role: targetRole,
+          full_name,
+          email,
+        });
+        if (profileErr) return json({ error: profileErr.message }, 400);
+
+        return json({ link: data.properties.action_link });
+      }
+
+      // type === "recovery" -- targets an existing user, nothing to insert.
+      const { data, error } = await adminClient.auth.admin.generateLink({
+        type: "recovery",
+        email,
+        options: { redirectTo: APP_RESET_PASSWORD_URL },
+      });
+      if (error || !data?.properties) return json({ error: error?.message ?? "Could not generate that link" }, 400);
+      return json({ link: data.properties.action_link });
     }
 
     return json({ error: "Unknown action" }, 400);

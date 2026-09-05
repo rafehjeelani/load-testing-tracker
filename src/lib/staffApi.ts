@@ -175,7 +175,10 @@ export function listModerators(): Promise<Moderator[]> {
 // generic "Edge Function returned a non-2xx status code" -- the actual
 // reason our functions send back as JSON only lives on error.context (the
 // raw Response), so it has to be read out separately.
-async function invokeFunction(name: string, body: Record<string, unknown>): Promise<{ error?: string }> {
+async function invokeFunction(
+  name: string,
+  body: Record<string, unknown>,
+): Promise<{ error?: string; link?: string }> {
   const { data, error } = await supabase.functions.invoke(name, { body });
   if (error) {
     let message = error.message;
@@ -227,6 +230,27 @@ export async function updateUserEmailAdmin(userId: string, email: string) {
 export async function deleteUserAdmin(userId: string) {
   const data = await invokeFunction("manage-users", { action: "delete", user_id: userId });
   if (data.error) throw new StaffApiError(data.error);
+}
+
+/** Admin-only: generates an invite link (creating the auth user + profile row) without sending an
+ *  email -- sidesteps Supabase's built-in email rate limit so the admin can share it directly. */
+export async function generateInviteLink(email: string, fullName: string, role: StaffRole): Promise<string> {
+  const data = await invokeFunction("manage-users", {
+    action: "generate_link",
+    type: "invite",
+    email,
+    full_name: fullName,
+    role,
+  });
+  if (data.error) throw new StaffApiError(data.error);
+  return data.link!;
+}
+
+/** Admin-only: generates a password reset link for an existing user without sending an email. */
+export async function generateResetLink(email: string): Promise<string> {
+  const data = await invokeFunction("manage-users", { action: "generate_link", type: "recovery", email });
+  if (data.error) throw new StaffApiError(data.error);
+  return data.link!;
 }
 
 /** The tests where the signed-in moderator has at least one assigned candidate. */

@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from "react";
 import {
   deleteUserAdmin,
+  generateInviteLink,
+  generateResetLink,
   inviteStaff,
   listAllUsers,
   requestPasswordReset,
@@ -17,6 +19,17 @@ import type { Moderator, StaffRole } from "../../types";
 const PROTECTED_EMAILS = ["rafehjeelani@gmail.com"];
 function isProtected(user: Moderator) {
   return PROTECTED_EMAILS.includes(user.email.toLowerCase());
+}
+
+/** Best-effort clipboard copy -- returns false (instead of throwing) when the
+ *  browser blocks it, so callers can fall back to showing the raw link. */
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
 }
 import {
   Badge,
@@ -43,6 +56,9 @@ export default function Users() {
   const [addError, setAddError] = useState<string | null>(null);
   const [addLoading, setAddLoading] = useState(false);
   const [addSent, setAddSent] = useState(false);
+  const [addLink, setAddLink] = useState<string | null>(null);
+  const [addLinkLoading, setAddLinkLoading] = useState(false);
+  const [addLinkCopied, setAddLinkCopied] = useState(false);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
@@ -54,6 +70,7 @@ export default function Users() {
   const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null);
   const [resettingId, setResettingId] = useState<string | null>(null);
   const [resetSentId, setResetSentId] = useState<string | null>(null);
+  const [linkCopiedId, setLinkCopiedId] = useState<string | null>(null);
 
   async function load() {
     setUsers(await listAllUsers());
@@ -77,6 +94,8 @@ export default function Users() {
     setAddRole("moderator");
     setAddError(null);
     setAddSent(false);
+    setAddLink(null);
+    setAddLinkCopied(false);
   }
 
   async function handleAdd(e: FormEvent) {
@@ -92,6 +111,28 @@ export default function Users() {
       setAddError(err instanceof StaffApiError ? err.message : "Couldn't send the invite. Try again.");
     } finally {
       setAddLoading(false);
+    }
+  }
+
+  /** Alternative to Send Invite that skips Supabase's built-in email send
+   *  entirely -- generates the same link, for the admin to copy and share
+   *  directly, so repeated use doesn't run into the email rate limit. */
+  async function handleGenerateLink() {
+    if (!addName.trim() || !addEmail.trim()) {
+      setAddError("Full Name and Email are required.");
+      return;
+    }
+    setAddLinkLoading(true);
+    setAddError(null);
+    try {
+      const link = await generateInviteLink(addEmail.trim(), addName.trim(), addRole);
+      setAddLink(link);
+      await copyToClipboard(link);
+      await load();
+    } catch (err) {
+      setAddError(err instanceof StaffApiError ? err.message : "Couldn't generate a link. Try again.");
+    } finally {
+      setAddLinkLoading(false);
     }
   }
 
@@ -149,6 +190,29 @@ export default function Users() {
       setTimeout(() => setResetSentId((id) => (id === user.id ? null : id)), 2500);
     } catch (err) {
       setRowError({ id: user.id, message: err instanceof StaffApiError ? err.message : "Couldn't send the reset email." });
+    } finally {
+      setResettingId(null);
+    }
+  }
+
+  /** Alternative to the email-sending reset above -- generates the reset link
+   *  without sending an email, so repeated resets for the same person don't
+   *  run into Supabase's built-in email rate limit. Copies it to the
+   *  clipboard for the admin to share directly. */
+  async function handleCopyResetLink(user: Moderator) {
+    setResettingId(user.id);
+    setRowError(null);
+    try {
+      const link = await generateResetLink(user.email);
+      const copied = await copyToClipboard(link);
+      if (copied) {
+        setLinkCopiedId(user.id);
+        setTimeout(() => setLinkCopiedId((id) => (id === user.id ? null : id)), 2500);
+      } else {
+        setRowError({ id: user.id, message: `Couldn't copy automatically -- here's the link: ${link}` });
+      }
+    } catch (err) {
+      setRowError({ id: user.id, message: err instanceof StaffApiError ? err.message : "Couldn't generate a link." });
     } finally {
       setResettingId(null);
     }
@@ -306,6 +370,24 @@ export default function Users() {
                             </button>
                             <button
                               type="button"
+                              onClick={() => handleCopyResetLink(user)}
+                              disabled={resettingId === user.id}
+                              className="text-text-3 hover:text-accent cursor-pointer disabled:opacity-50"
+                              title="Copy password reset link (no email sent -- avoids the email limit)"
+                            >
+                              {linkCopiedId === user.id ? (
+                                <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth={2.5}>
+                                  <path d="M20 6L9 17l-5-5" />
+                                </svg>
+                              ) : (
+                                <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                                  <path d="M10 13a5 5 0 007.07 0l1.93-1.93a5 5 0 00-7.07-7.07L10.5 5.5" />
+                                  <path d="M14 11a5 5 0 00-7.07 0L5 12.93a5 5 0 007.07 7.07L13.5 18.5" />
+                                </svg>
+                              )}
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => handleDelete(user)}
                               disabled={isProtected(user)}
                               className={`cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
@@ -341,6 +423,38 @@ export default function Users() {
               <span className="font-semibold text-text">{addEmail}</span> will get an email with a link to
               set their password and sign in as {addRole === "admin" ? "an admin" : "a moderator"}.
             </p>
+            <Button variant="secondary" onClick={closeAdd}>
+              Done
+            </Button>
+          </div>
+        ) : addLink ? (
+          <div>
+            <p className="text-[13px] text-text-2 mb-3 leading-relaxed">
+              {addName} was added as {addRole === "admin" ? "an admin" : "a moderator"}. Share this link with
+              them directly — it lets them set their password and sign in (no email was sent):
+            </p>
+            <div className="flex items-center gap-2 mb-4">
+              <input
+                readOnly
+                value={addLink}
+                onFocus={(e) => e.target.select()}
+                className="w-full px-2.5 py-2 border border-border rounded-[7px] bg-surface-2 text-[12.5px] font-mono-tabular"
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                className="shrink-0"
+                onClick={async () => {
+                  const copied = await copyToClipboard(addLink);
+                  if (copied) {
+                    setAddLinkCopied(true);
+                    setTimeout(() => setAddLinkCopied(false), 2500);
+                  }
+                }}
+              >
+                {addLinkCopied ? "Copied!" : "Copy"}
+              </Button>
+            </div>
             <Button variant="secondary" onClick={closeAdd}>
               Done
             </Button>
@@ -390,9 +504,18 @@ export default function Users() {
               />
             </div>
             {addError && <div className="text-[12.5px] text-danger">{addError}</div>}
-            <div className="flex items-center gap-2">
-              <Button type="submit" disabled={addLoading}>
-                {addLoading ? "Sending…" : "Send Invite"}
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button type="submit" disabled={addLoading || addLinkLoading}>
+                {addLoading ? "Sending…" : "Send Invite Email"}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={addLoading || addLinkLoading}
+                onClick={handleGenerateLink}
+                title="Skips Supabase's email limit -- copies the invite link to share directly"
+              >
+                {addLinkLoading ? "Generating…" : "Copy Invite Link"}
               </Button>
               <Button type="button" variant="ghost" onClick={closeAdd}>
                 Cancel
