@@ -1,8 +1,8 @@
-import { useState, type FormEvent } from "react";
+import { useState } from "react";
 import { useParams } from "react-router-dom";
-import { getTest, inviteStaff, listCandidates, listModerators, StaffApiError } from "../../lib/staffApi";
-import type { CandidateListItem, Moderator, StaffRole, Test } from "../../types";
-import { Badge, Button, ErrorState, FieldLabel, Input, LoadingState, PageHeader, RefreshButton } from "../../components/ui";
+import { getTest, listCandidates, listModerators } from "../../lib/staffApi";
+import type { CandidateListItem, Moderator, Test } from "../../types";
+import { Badge, ErrorState, LoadingState, PageHeader, RefreshButton } from "../../components/ui";
 import { TopNav } from "../staff/TopNav";
 import { useAsyncLoad } from "../../lib/useAsyncLoad";
 
@@ -18,13 +18,6 @@ export default function Moderators() {
   const { testId } = useParams<{ testId: string }>();
   const [test, setTest] = useState<Test | null>(null);
   const [rows, setRows] = useState<Row[] | null>(null);
-  const [inviting, setInviting] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteName, setInviteName] = useState("");
-  const [inviteRole, setInviteRole] = useState<StaffRole>("moderator");
-  const [inviteError, setInviteError] = useState<string | null>(null);
-  const [inviteLoading, setInviteLoading] = useState(false);
-  const [inviteSent, setInviteSent] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   async function load() {
@@ -59,22 +52,6 @@ export default function Moderators() {
       .filter((r) => r.assigned > 0);
   }
 
-  async function handleInvite(e: FormEvent) {
-    e.preventDefault();
-    if (!inviteEmail.trim() || !inviteName.trim()) return;
-    setInviteLoading(true);
-    setInviteError(null);
-    try {
-      await inviteStaff(inviteEmail.trim(), inviteName.trim(), inviteRole);
-      setInviteSent(true);
-      await load();
-    } catch (err) {
-      setInviteError(err instanceof StaffApiError ? err.message : "Couldn't send the invite. Try again.");
-    } finally {
-      setInviteLoading(false);
-    }
-  }
-
   async function handleRefresh() {
     setRefreshing(true);
     try {
@@ -82,15 +59,6 @@ export default function Moderators() {
     } finally {
       setRefreshing(false);
     }
-  }
-
-  function closeInvite() {
-    setInviting(false);
-    setInviteEmail("");
-    setInviteName("");
-    setInviteRole("moderator");
-    setInviteError(null);
-    setInviteSent(false);
   }
 
   if (status === "loading") return <LoadingState slow={slow} />;
@@ -113,95 +81,14 @@ export default function Moderators() {
           <div>
             <h1 className="text-[22px] font-bold m-0">{test.name} — Moderators</h1>
             <div className="text-[12.5px] text-text-3 mt-1">
-              Operational workload balance across moderators — not a performance ranking
+              Operational workload balance across moderators — not a performance ranking. Manage
+              accounts under Users.
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <RefreshButton onClick={handleRefresh} loading={refreshing} />
-            <Button onClick={() => setInviting(true)} className="flex items-center gap-1.5 whitespace-nowrap">
-              <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-              Add Team Member
-            </Button>
-          </div>
+          <RefreshButton onClick={handleRefresh} loading={refreshing} />
         </div>
       </PageHeader>
       <div className="max-w-[1240px] mx-auto px-8 pt-5 pb-7">
-        {inviting && (
-          <div className="bg-surface border border-dashed border-border rounded-[10px] p-4 mb-5">
-            {inviteSent ? (
-              <div>
-                <div className="font-semibold text-[13.5px] mb-1.5">Invite sent</div>
-                <p className="text-[13px] text-text-2 mb-4 leading-relaxed">
-                  <span className="font-semibold text-text">{inviteEmail}</span> will get an email with a link to
-                  set their password and sign in as {inviteRole === "admin" ? "an admin" : "a moderator"}.
-                </p>
-                <Button variant="secondary" onClick={closeInvite}>
-                  Done
-                </Button>
-              </div>
-            ) : (
-              <form onSubmit={handleInvite} className="flex flex-col gap-3 max-w-xl">
-                <div className="font-semibold text-[13.5px]">Add Team Member</div>
-                <div>
-                  <FieldLabel>Role</FieldLabel>
-                  <div className="flex gap-4">
-                    <label className="flex items-center gap-1.5 text-[13px] cursor-pointer">
-                      <input
-                        type="radio"
-                        name="invite-role"
-                        checked={inviteRole === "moderator"}
-                        onChange={() => setInviteRole("moderator")}
-                      />
-                      Moderator
-                    </label>
-                    <label className="flex items-center gap-1.5 text-[13px] cursor-pointer">
-                      <input
-                        type="radio"
-                        name="invite-role"
-                        checked={inviteRole === "admin"}
-                        onChange={() => setInviteRole("admin")}
-                      />
-                      Admin
-                    </label>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <FieldLabel required>Full Name</FieldLabel>
-                  <Input
-                    required
-                    placeholder="e.g. Priya Nair"
-                    value={inviteName}
-                    onChange={(e) => setInviteName(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <FieldLabel required>Email</FieldLabel>
-                  <Input
-                    type="email"
-                    required
-                    placeholder="moderator@talview.com"
-                    value={inviteEmail}
-                    onChange={(e) => setInviteEmail(e.target.value)}
-                  />
-                </div>
-                </div>
-                {inviteError && <div className="text-[12.5px] text-danger">{inviteError}</div>}
-                <div className="flex items-center gap-2">
-                  <Button type="submit" disabled={inviteLoading}>
-                    {inviteLoading ? "Sending…" : "Send Invite"}
-                  </Button>
-                  <Button type="button" variant="ghost" onClick={closeInvite}>
-                    Cancel
-                  </Button>
-                </div>
-              </form>
-            )}
-          </div>
-        )}
-
         <div className="bg-surface border border-border rounded-[10px] overflow-x-auto">
           <table className="w-full text-[13.5px]">
             <thead>

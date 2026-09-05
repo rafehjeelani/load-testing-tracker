@@ -4,6 +4,9 @@ import { Logo } from "../../components/Logo";
 export interface NavTab {
   label: string;
   to: string;
+  /** Pass when `to` is a prefix of another tab's path (e.g. "/admin" vs
+   *  "/admin/users") so NavLink doesn't mark both active at once. */
+  end?: boolean;
 }
 
 export function TopNav({
@@ -31,6 +34,7 @@ export function TopNav({
               <NavLink
                 key={tab.to}
                 to={tab.to}
+                end={tab.end}
                 className={({ isActive }) =>
                   `px-3.5 h-full flex items-center text-[13.5px] ${
                     isActive

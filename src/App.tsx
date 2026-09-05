@@ -9,6 +9,7 @@ import Login from "./routes/staff/Login";
 import ResetPassword from "./routes/staff/ResetPassword";
 import CandidateForm from "./routes/staff/CandidateForm";
 import TestList from "./routes/admin/TestList";
+import Users from "./routes/admin/Users";
 import CreateTest from "./routes/admin/CreateTest";
 import Candidates from "./routes/admin/Candidates";
 import Steps from "./routes/admin/Steps";
@@ -41,6 +42,7 @@ export default function App() {
         <Route path="/admin/login" element={<Login role="admin" />} />
         <Route element={<RequireRole role="admin" />}>
           <Route path="/admin" element={<TestList />} />
+          <Route path="/admin/users" element={<Users />} />
           <Route path="/admin/tests/new" element={<CreateTest />} />
           <Route path="/admin/tests/:testId" element={<Navigate to="candidates" replace />} />
           <Route path="/admin/tests/:testId/candidates" element={<Candidates />} />

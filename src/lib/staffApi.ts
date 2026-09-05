@@ -171,13 +171,62 @@ export function listModerators(): Promise<Moderator[]> {
   );
 }
 
+// supabase-js's error.message for a non-2xx Edge Function response is a
+// generic "Edge Function returned a non-2xx status code" -- the actual
+// reason our functions send back as JSON only lives on error.context (the
+// raw Response), so it has to be read out separately.
+async function invokeFunction(name: string, body: Record<string, unknown>): Promise<{ error?: string }> {
+  const { data, error } = await supabase.functions.invoke(name, { body });
+  if (error) {
+    let message = error.message;
+    const context = (error as { context?: Response }).context;
+    if (context && typeof context.json === "function") {
+      try {
+        const parsed = await context.json();
+        if (parsed?.error) message = parsed.error;
+      } catch {
+        // Response body wasn't JSON -- fall back to the generic message.
+      }
+    }
+    throw new StaffApiError(message);
+  }
+  return data ?? {};
+}
+
 /** Admin-only: invites a new admin or moderator by email via the create-moderator edge function. */
 export async function inviteStaff(email: string, fullName: string, role: StaffRole) {
-  const { data, error } = await supabase.functions.invoke("create-moderator", {
-    body: { email, full_name: fullName, role },
-  });
+  const data = await invokeFunction("create-moderator", { email, full_name: fullName, role });
+  if (data.error) throw new StaffApiError(data.error);
+}
+
+// --- Users (global admin-only management, across all tests) ---
+
+/** Every staff account (admin or moderator) in the org, alphabetical. */
+export function listAllUsers(): Promise<Moderator[]> {
+  return unwrap(supabase.from("profiles").select("id, full_name, email, role").order("full_name"));
+}
+
+export async function updateUserFullName(userId: string, fullName: string) {
+  const { error } = await supabase.from("profiles").update({ full_name: fullName }).eq("id", userId);
   if (error) throw new StaffApiError(error.message);
-  if (data?.error) throw new StaffApiError(data.error);
+}
+
+export async function updateUserRole(userId: string, role: StaffRole) {
+  const { error } = await supabase.from("profiles").update({ role }).eq("id", userId);
+  if (error) throw new StaffApiError(error.message);
+}
+
+/** Admin-only: changes a user's login email (Auth + profiles, kept in sync) via the manage-users edge function. */
+export async function updateUserEmailAdmin(userId: string, email: string) {
+  const data = await invokeFunction("manage-users", { action: "update_email", user_id: userId, email });
+  if (data.error) throw new StaffApiError(data.error);
+}
+
+/** Admin-only: permanently deletes a user's account via the manage-users edge function. Fails with a
+ *  clear message if they're still assigned as moderator on any candidate -- reassign those first. */
+export async function deleteUserAdmin(userId: string) {
+  const data = await invokeFunction("manage-users", { action: "delete", user_id: userId });
+  if (data.error) throw new StaffApiError(data.error);
 }
 
 /** The tests where the signed-in moderator has at least one assigned candidate. */

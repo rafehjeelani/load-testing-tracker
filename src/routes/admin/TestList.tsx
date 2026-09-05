@@ -31,7 +31,10 @@ export default function TestList() {
 
   return (
     <div className="min-h-screen bg-bg text-text">
-      <TopNav brandTo="/admin" />
+      <TopNav
+        brandTo="/admin"
+        tabs={[{ label: "Tests", to: "/admin", end: true }, { label: "Users", to: "/admin/users" }]}
+      />
       <PageHeader>
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
