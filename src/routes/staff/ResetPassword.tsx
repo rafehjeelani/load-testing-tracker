@@ -69,7 +69,7 @@ export default function ResetPassword() {
             <h1 className="text-[17px] font-bold text-center mb-6">Set a new password</h1>
             <form onSubmit={handleSubmit} className="flex flex-col gap-3.5">
               <div>
-                <FieldLabel>New Password</FieldLabel>
+                <FieldLabel required>New Password</FieldLabel>
                 <Input
                   type="password"
                   required
@@ -79,7 +79,7 @@ export default function ResetPassword() {
                 />
               </div>
               <div>
-                <FieldLabel>Confirm Password</FieldLabel>
+                <FieldLabel required>Confirm Password</FieldLabel>
                 <Input
                   type="password"
                   required

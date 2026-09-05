@@ -1,6 +1,9 @@
 export type Outcome = "without_issues" | "with_issues" | "unable";
 export type StaffRole = "admin" | "moderator";
 
+export const MAX_EVIDENCE_FILES = 5;
+export const MAX_EVIDENCE_FILE_SIZE_MB = 10;
+
 export interface Step {
   id: string;
   name: string;
@@ -12,7 +15,7 @@ export interface StepReport {
   step_id: string;
   outcome: Outcome | null;
   comment: string | null;
-  evidence_path: string | null;
+  evidence_paths: string[];
   saved_at: string | null;
 }
 
@@ -21,7 +24,7 @@ export interface Issue {
   step_id: string | null;
   custom_step_name: string | null;
   comment: string;
-  evidence_path: string;
+  evidence_paths: string[];
   created_at: string;
 }
 
@@ -58,6 +61,7 @@ export interface Moderator {
   id: string;
   full_name: string;
   email: string;
+  role: StaffRole;
 }
 
 /** A candidate row as listed in the Candidates table, with one outcome per step. */
@@ -74,7 +78,7 @@ export interface CandidateListItem {
       outcome: Outcome | null;
       saved_at: string | null;
       comment: string | null;
-      evidence_path: string | null;
+      evidence_paths: string[];
       updated_at: string | null;
     }
   >;

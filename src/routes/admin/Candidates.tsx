@@ -1,21 +1,25 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   addCandidate,
   assignModerator,
+  deleteCandidate,
   listCandidates,
   listIssuesForTest,
   listModerators,
   listSteps,
   getTest,
+  updateCandidateEmail,
+  updateTestName,
   StaffApiError,
 } from "../../lib/staffApi";
 import type { CandidateListItem, Moderator, Step, Test } from "../../types";
 import { formatTime, OUTCOME_TEXT_COLOR } from "../../lib/outcome";
 import { downloadCsv } from "../../lib/csv";
-import { Button } from "../../components/ui";
+import { Button, ErrorState, LoadingState, PageHeader, RefreshButton } from "../../components/ui";
 import { TopNav } from "../staff/TopNav";
 import ModeratorSelect from "./ModeratorSelect";
+import { useAsyncLoad } from "../../lib/useAsyncLoad";
 
 function adminTabs(testId: string) {
   return [
@@ -40,6 +44,11 @@ export default function Candidates() {
   const [newEmail, setNewEmail] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [editingCandidateId, setEditingCandidateId] = useState<string | null>(null);
+  const [emailDraft, setEmailDraft] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
   const [exportOpts, setExportOpts] = useState({
     summary: true,
     stepTimestamps: true,
@@ -47,7 +56,7 @@ export default function Candidates() {
     evidenceLinks: false,
   });
 
-  const load = useCallback(async () => {
+  async function load() {
     if (!testId) return;
     const [t, s, c, m] = await Promise.all([
       getTest(testId),
@@ -59,15 +68,13 @@ export default function Candidates() {
     setSteps(s);
     setCandidates(c);
     setModerators(m);
-  }, [testId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  if (!test || !testId) {
-    return <div className="min-h-screen bg-bg flex items-center justify-center text-text-2 text-sm">Loading…</div>;
   }
+
+  const { status, error, slow, retry } = useAsyncLoad(load, [testId]);
+
+  if (status === "loading") return <LoadingState slow={slow} />;
+  if (status === "error") return <ErrorState message={error!} onRetry={retry} />;
+  if (!test || !testId) return null;
   const testSlug = test.slug;
 
   const formUrl = `${window.location.origin}${import.meta.env.BASE_URL}t/${testSlug}`;
@@ -97,6 +104,47 @@ export default function Candidates() {
     await assignModerator(candidateId, moderatorId);
   }
 
+  async function handleSaveEmail(candidateId: string) {
+    const next = emailDraft.trim();
+    const current = candidates.find((c) => c.id === candidateId)?.email;
+    if (!next || next === current) {
+      setEditingCandidateId(null);
+      return;
+    }
+    await updateCandidateEmail(candidateId, next);
+    setCandidates((cs) => cs.map((c) => (c.id === candidateId ? { ...c, email: next } : c)));
+    setEditingCandidateId(null);
+  }
+
+  async function handleDeleteCandidate(candidate: CandidateListItem) {
+    const ok = window.confirm(
+      `Delete ${candidate.email}? This permanently deletes their step reports and logged issues too.`,
+    );
+    if (!ok) return;
+    await deleteCandidate(candidate.id);
+    setCandidates((cs) => cs.filter((c) => c.id !== candidate.id));
+  }
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  async function handleSaveName() {
+    const next = nameDraft.trim();
+    if (!next || next === test!.name) {
+      setEditingName(false);
+      return;
+    }
+    await updateTestName(testId!, next);
+    setTest((t) => (t ? { ...t, name: next } : t));
+    setEditingName(false);
+  }
+
   async function handleCopyUrl() {
     await navigator.clipboard.writeText(formUrl);
     setCopied(true);
@@ -118,7 +166,7 @@ export default function Candidates() {
           const r = c.step_outcomes[step.id];
           if (exportOpts.stepTimestamps) row.push(r?.outcome ?? "", r?.saved_at ?? "");
           if (exportOpts.comments) row.push(r?.comment ?? "");
-          if (exportOpts.evidenceLinks) row.push(r?.evidence_path ?? "");
+          if (exportOpts.evidenceLinks) row.push((r?.evidence_paths ?? []).join("; "));
         }
         return row;
       });
@@ -132,7 +180,7 @@ export default function Candidates() {
         i.candidate_email,
         i.custom_step_name ?? steps.find((s) => s.id === i.step_id)?.name ?? "",
         i.comment,
-        i.evidence_path,
+        i.evidence_paths.join("; "),
         i.created_at,
       ]);
       downloadCsv(`${testSlug}-issues.csv`, headers, rows);
@@ -142,15 +190,82 @@ export default function Candidates() {
   return (
     <div className="min-h-screen bg-bg text-text">
       <TopNav brandTo="/admin" tabs={adminTabs(testId)} />
-      <div className="max-w-[1240px] mx-auto px-8 py-7">
-        <div className="mb-4.5">
-          <h1 className="text-[22px] font-bold m-0">{test.name}</h1>
+      <PageHeader>
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+          {editingName ? (
+            <div className="flex items-center gap-2">
+              <input
+                autoFocus
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSaveName();
+                  if (e.key === "Escape") setEditingName(false);
+                }}
+                className="text-[22px] font-bold px-2 py-1 border border-border rounded-[7px] bg-surface"
+              />
+              <button
+                type="button"
+                onClick={handleSaveName}
+                className="text-success cursor-pointer"
+                title="Save name"
+              >
+                <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingName(false)}
+                className="text-text-3 cursor-pointer text-[18px]"
+              >
+                ×
+              </button>
+            </div>
+          ) : (
+            <h1 className="text-[22px] font-bold m-0 flex items-center gap-2 group">
+              {test.name}
+              <button
+                type="button"
+                onClick={() => {
+                  setNameDraft(test.name);
+                  setEditingName(true);
+                }}
+                className="text-text-3 hover:text-accent cursor-pointer"
+                title="Edit test name"
+              >
+                <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
+                </svg>
+              </button>
+            </h1>
+          )}
           <div className="text-[12.5px] text-text-3 mt-1">
             Candidates self-report their progress through this test on their own device while taking the real test
             in Talview
           </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <RefreshButton onClick={handleRefresh} loading={refreshing} />
+            <Button
+              variant="secondary"
+              onClick={() => navigate(`/moderator/tests/${testId}/dashboard`)}
+              className="flex items-center gap-1.5 whitespace-nowrap"
+            >
+              <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M22 21v-2a4 4 0 00-3-3.87" />
+                <path d="M16 3.13a4 4 0 010 7.75" />
+              </svg>
+              View as Moderator
+            </Button>
+          </div>
         </div>
-
+      </PageHeader>
+      <div className="max-w-[1240px] mx-auto px-8 pt-5 pb-7">
         <div className="bg-surface border border-border rounded-[10px] p-4 mb-4.5">
           <div className="text-[11.5px] font-semibold text-text-3 uppercase tracking-wide mb-2">
             Candidate Form URL
@@ -260,14 +375,88 @@ export default function Candidates() {
                   </td>
                 </tr>
               )}
-              {filtered.map((c) => (
+              {filtered.map((c) => {
+                const hasData = c.submitted || Object.values(c.step_outcomes).some((o) => o.outcome);
+                return (
                 <tr key={c.id} className="border-b border-border-soft last:border-0 hover:bg-surface-2">
-                  <td
-                    onClick={() => navigate(`/admin/tests/${testId}/candidates/${c.id}`)}
-                    className="px-4 py-2.5 font-semibold cursor-pointer"
-                  >
-                    {c.email}
-                  </td>
+                  {editingCandidateId === c.id ? (
+                    <td className="px-4 py-2">
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          autoFocus
+                          type="email"
+                          value={emailDraft}
+                          onChange={(e) => setEmailDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleSaveEmail(c.id);
+                            if (e.key === "Escape") setEditingCandidateId(null);
+                          }}
+                          className="flex-1 min-w-0 px-2 py-1 border border-border rounded-[6px] bg-surface text-[13px]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleSaveEmail(c.id)}
+                          className="text-success cursor-pointer shrink-0"
+                          title="Save email"
+                        >
+                          <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+                            <path d="M20 6L9 17l-5-5" />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingCandidateId(null)}
+                          className="text-text-3 cursor-pointer text-[14px] shrink-0"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </td>
+                  ) : (
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <span
+                          onClick={() => navigate(`/admin/tests/${testId}/candidates/${c.id}`)}
+                          title={c.email}
+                          className="font-semibold cursor-pointer truncate max-w-[220px]"
+                        >
+                          {c.email}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingCandidateId(c.id);
+                            setEmailDraft(c.email);
+                          }}
+                          className="text-text-3 hover:text-accent cursor-pointer shrink-0"
+                          title="Edit email"
+                        >
+                          <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                            <path d="M12 20h9" />
+                            <path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
+                          </svg>
+                        </button>
+                        {!hasData && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteCandidate(c);
+                            }}
+                            className="text-text-3 hover:text-danger cursor-pointer shrink-0"
+                            title="Delete candidate"
+                          >
+                            <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                              <path d="M3 6h18" />
+                              <path d="M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2m2 0v14a1 1 0 01-1 1H7a1 1 0 01-1-1V6" />
+                              <path d="M10 11v6M14 11v6" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  )}
                   <td className="px-4 py-2.5">
                     <ModeratorSelect
                       moderators={moderators}
@@ -290,11 +479,15 @@ export default function Candidates() {
                     );
                   })}
                 </tr>
-              ))}
+                );
+              })}
               {adding ? (
                 <tr className="bg-accent-soft">
                   <td className="px-4 py-2" colSpan={2}>
                     <form onSubmit={handleAddCandidate} className="flex items-center gap-2">
+                      <span className="text-danger text-[13px] shrink-0" title="Required">
+                        *
+                      </span>
                       <input
                         autoFocus
                         type="email"

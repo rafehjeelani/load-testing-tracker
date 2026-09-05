@@ -1,17 +1,19 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
 import { useCandidateSession } from "./CandidateSessionContext";
-import { addIssue, submitForm, upsertStepReport, uploadEvidence } from "../../lib/candidateApi";
-import { Badge, Button } from "../../components/ui";
+import { addIssue, getEvidenceViewUrl, submitForm, upsertStepReport, uploadEvidence } from "../../lib/candidateApi";
+import { Badge, Button, PageHeader } from "../../components/ui";
 import { Logo } from "../../components/Logo";
 import StepRow from "./StepRow";
-import IssuesSection from "../../components/IssuesSection";
+import IssuesSection, { type IssuesSectionHandle } from "../../components/IssuesSection";
 import type { Outcome } from "../../types";
 
 export default function StepForm() {
   const { testSlug } = useParams<{ testSlug: string }>();
   const { session, setSession } = useCandidateSession();
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const issuesRef = useRef<IssuesSectionHandle>(null);
 
   if (!session || session.testSlug !== testSlug) {
     // No live session for this test (fresh load, refresh, or a different
@@ -25,22 +27,49 @@ export default function StepForm() {
     stepId: string,
     outcome: Outcome | null,
     comment: string,
-    evidencePath: string | null,
+    evidencePaths: string[],
   ) {
-    return upsertStepReport(sessionTestSlug, email, stepId, outcome, comment, evidencePath);
+    const result = await upsertStepReport(sessionTestSlug, email, stepId, outcome, comment, evidencePaths);
+    // Keep session.state.step_reports in sync with every save -- otherwise
+    // it stays frozen at whatever loaded on page-open, and the submit-time
+    // validation below (missing evidence/comment) silently checks stale
+    // data instead of what the candidate just entered.
+    const existing = state.step_reports.find((r) => r.step_id === stepId);
+    setSession({
+      testSlug: sessionTestSlug,
+      email,
+      state: {
+        ...state,
+        step_reports: [
+          ...state.step_reports.filter((r) => r.step_id !== stepId),
+          {
+            step_id: stepId,
+            outcome,
+            comment,
+            evidence_paths: evidencePaths,
+            saved_at: result?.saved_at ?? existing?.saved_at ?? null,
+          },
+        ],
+      },
+    });
+    return result;
   }
 
   async function handleUpload(file: File) {
     return uploadEvidence(sessionTestSlug, email, file);
   }
 
+  async function handleViewEvidence(path: string) {
+    return getEvidenceViewUrl(path);
+  }
+
   async function handleAddIssue(
     stepId: string | null,
     customStepName: string | null,
     comment: string,
-    evidencePath: string,
+    evidencePaths: string[],
   ) {
-    await addIssue(sessionTestSlug, email, stepId, customStepName, comment, evidencePath);
+    await addIssue(sessionTestSlug, email, stepId, customStepName, comment, evidencePaths);
     setSession({
       testSlug: sessionTestSlug,
       email,
@@ -53,7 +82,7 @@ export default function StepForm() {
             step_id: stepId,
             custom_step_name: customStepName,
             comment,
-            evidence_path: evidencePath,
+            evidence_paths: evidencePaths,
             created_at: new Date().toISOString(),
           },
         ],
@@ -61,7 +90,39 @@ export default function StepForm() {
     });
   }
 
+  function missingEvidenceSteps(): string[] {
+    return sortedSteps
+      .filter((s) => {
+        const r = reportByStep.get(s.id);
+        return r?.outcome && r.evidence_paths.length === 0;
+      })
+      .map((s) => s.name);
+  }
+
+  function missingCommentSteps(): string[] {
+    return sortedSteps
+      .filter((s) => {
+        const r = reportByStep.get(s.id);
+        return (r?.outcome === "with_issues" || r?.outcome === "unable") && !r.comment?.trim();
+      })
+      .map((s) => s.name);
+  }
+
   async function handleSubmitForm() {
+    const missingEvidence = missingEvidenceSteps();
+    const missingComment = missingCommentSteps();
+    if (missingEvidence.length > 0 || missingComment.length > 0) {
+      const parts: string[] = [];
+      if (missingEvidence.length > 0) {
+        parts.push(`attach at least one piece of evidence for: ${missingEvidence.join(", ")}`);
+      }
+      if (missingComment.length > 0) {
+        parts.push(`add a comment explaining what happened for: ${missingComment.join(", ")}`);
+      }
+      setSubmitError(`Please ${parts.join("; and ")}.`);
+      return;
+    }
+    setSubmitError(null);
     setSubmitting(true);
     try {
       await submitForm(sessionTestSlug, email);
@@ -83,25 +144,39 @@ export default function StepForm() {
 
   return (
     <div className="min-h-screen bg-bg text-text">
-      <div className="border-b border-border bg-surface">
+      <div className="sticky top-0 z-30 border-b border-border bg-surface">
         <div className="max-w-[760px] mx-auto px-6 h-[52px] flex items-center gap-2">
           <Logo />
           <span className="font-semibold text-sm">Load Testing Tracker</span>
         </div>
       </div>
 
-      <div className="max-w-[760px] mx-auto px-6 pt-7 pb-14">
-        <div className="flex items-start justify-between gap-3 flex-wrap mb-5">
+      <PageHeader maxWidthClassName="max-w-[760px]" paddingClassName="px-6 py-4">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <div className="font-semibold text-[15px]">{email}</div>
             <div className="text-[12.5px] text-text-2 mt-0.5">{state.test.name}</div>
           </div>
-          <span className="inline-flex items-center gap-1.5 text-[12px] text-success">
-            <span className="w-1.5 h-1.5 rounded-full bg-success" />
-            Saved
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="inline-flex items-center gap-1.5 text-[12px] text-success">
+              <span className="w-1.5 h-1.5 rounded-full bg-success" />
+              Saved
+            </span>
+            <Button
+              variant="secondary"
+              onClick={() => issuesRef.current?.open()}
+              className="flex items-center gap-1.5 whitespace-nowrap"
+            >
+              <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              Add Issue / Disconnection
+            </Button>
+          </div>
         </div>
+      </PageHeader>
 
+      <div className="max-w-[760px] mx-auto px-6 pt-5 pb-14">
         <p className="text-[12.5px] text-text-3 mb-4 leading-relaxed">
           While you take the test in the other tab, mark how each step actually went below. Your
           answers save automatically as you type — the timestamp on each step is stamped the
@@ -114,26 +189,32 @@ export default function StepForm() {
           return (
             <StepRow
               key={step.id}
-              stepId={step.id}
               name={step.name}
+              stepRequired={step.required}
               radioGroup={`step-${step.id}`}
               initialOutcome={report?.outcome ?? null}
               initialComment={report?.comment ?? ""}
-              initialEvidencePath={report?.evidence_path ?? null}
+              initialEvidencePaths={report?.evidence_paths ?? []}
               initialSavedAt={report?.saved_at ?? null}
-              onSave={(outcome, comment, evidencePath) =>
-                handleSaveStep(step.id, outcome, comment, evidencePath)
+              onSave={(outcome, comment, evidencePaths) =>
+                handleSaveStep(step.id, outcome, comment, evidencePaths)
               }
               onUpload={handleUpload}
+              onViewEvidence={handleViewEvidence}
             />
           );
         })}
 
         <IssuesSection
+          ref={issuesRef}
           steps={sortedSteps}
           issues={state.issues}
           onAdd={handleAddIssue}
           onUpload={handleUpload}
+          onDownload={async (path) => {
+            window.open(await handleViewEvidence(path), "_blank");
+          }}
+          getPreviewUrl={handleViewEvidence}
         />
 
         <div className="text-[12px] text-text-3 text-center mt-2">
@@ -148,6 +229,7 @@ export default function StepForm() {
             Submitting lets the test team know you're done reporting. You can still edit your
             answers and resubmit afterward — this just marks where things stand right now.
           </div>
+          {submitError && <div className="text-[12.5px] text-danger mb-3 max-w-[440px] mx-auto">{submitError}</div>}
           <Button onClick={handleSubmitForm} disabled={submitting} className="min-w-[220px]">
             {state.candidate.submitted ? "Resubmit Form" : "Submit Form"}
           </Button>

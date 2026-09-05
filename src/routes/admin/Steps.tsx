@@ -1,11 +1,36 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { useParams } from "react-router-dom";
-import { addStep, getTest, listSteps, updateStep } from "../../lib/staffApi";
+import { addStep, deleteStep, getTest, listSteps, reorderSteps, updateStep } from "../../lib/staffApi";
 import type { Step, Test } from "../../types";
-import { Button } from "../../components/ui";
+import { Button, ErrorState, LoadingState, PageHeader, RefreshButton } from "../../components/ui";
 import { TopNav } from "../staff/TopNav";
+import { useAsyncLoad } from "../../lib/useAsyncLoad";
 
-function StepRow({ step, index, onSaved }: { step: Step; index: number; onSaved: () => void }) {
+interface RowProps {
+  step: Step;
+  index: number;
+  dragging: boolean;
+  dropTarget: boolean;
+  onDragStart: (index: number) => void;
+  onDragOver: (index: number) => void;
+  onDrop: (index: number) => void;
+  onDragEnd: () => void;
+  onSaved: () => void;
+  onDelete: (step: Step) => void;
+}
+
+function StepRow({
+  step,
+  index,
+  dragging,
+  dropTarget,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  onSaved,
+  onDelete,
+}: RowProps) {
   const [name, setName] = useState(step.name);
 
   async function saveName() {
@@ -23,15 +48,35 @@ function StepRow({ step, index, onSaved }: { step: Step; index: number; onSaved:
   }
 
   return (
-    <div className="flex items-center gap-3 px-4 py-3">
-      <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth={2}>
-        <circle cx="9" cy="6" r="1.2" />
-        <circle cx="9" cy="12" r="1.2" />
-        <circle cx="9" cy="18" r="1.2" />
-        <circle cx="15" cy="6" r="1.2" />
-        <circle cx="15" cy="12" r="1.2" />
-        <circle cx="15" cy="18" r="1.2" />
-      </svg>
+    <div
+      className={`flex items-center gap-3 px-4 py-3 ${dragging ? "opacity-40" : ""} ${
+        dropTarget && !dragging ? "bg-accent-soft" : ""
+      }`}
+      onDragOver={(e) => {
+        e.preventDefault();
+        onDragOver(index);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDrop(index);
+      }}
+    >
+      <span
+        draggable
+        onDragStart={() => onDragStart(index)}
+        onDragEnd={onDragEnd}
+        className="cursor-grab active:cursor-grabbing"
+        title="Drag to reorder"
+      >
+        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth={2}>
+          <circle cx="9" cy="6" r="1.2" />
+          <circle cx="9" cy="12" r="1.2" />
+          <circle cx="9" cy="18" r="1.2" />
+          <circle cx="15" cy="6" r="1.2" />
+          <circle cx="15" cy="12" r="1.2" />
+          <circle cx="15" cy="18" r="1.2" />
+        </svg>
+      </span>
       <span className="font-mono-tabular text-text-3 text-[12.5px] w-5">{index + 1}</span>
       <input
         value={name}
@@ -49,6 +94,18 @@ function StepRow({ step, index, onSaved }: { step: Step; index: number; onSaved:
       >
         {step.required ? "Required" : "Optional"}
       </button>
+      <button
+        type="button"
+        onClick={() => onDelete(step)}
+        className="text-text-3 hover:text-danger cursor-pointer"
+        title="Delete step"
+      >
+        <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path d="M3 6h18" />
+          <path d="M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2m2 0v14a1 1 0 01-1 1H7a1 1 0 01-1-1V6" />
+          <path d="M10 11v6M14 11v6" />
+        </svg>
+      </button>
     </div>
   );
 }
@@ -59,6 +116,9 @@ export default function Steps() {
   const [steps, setSteps] = useState<Step[]>([]);
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   async function load() {
     if (!testId) return;
@@ -67,10 +127,16 @@ export default function Steps() {
     setSteps(s);
   }
 
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [testId]);
+  async function handleRefresh() {
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  const { status, error, slow, retry } = useAsyncLoad(load, [testId]);
 
   async function handleAdd(e: FormEvent) {
     e.preventDefault();
@@ -81,9 +147,34 @@ export default function Steps() {
     await load();
   }
 
-  if (!test || !testId) {
-    return <div className="min-h-screen bg-bg flex items-center justify-center text-text-2 text-sm">Loading…</div>;
+  async function handleDelete(step: Step) {
+    const ok = window.confirm(
+      `Delete "${step.name}"? This also permanently deletes any candidate reports already logged against this step.`,
+    );
+    if (!ok) return;
+    await deleteStep(step.id);
+    await load();
   }
+
+  async function handleDrop(targetIndex: number) {
+    if (dragIndex === null || dragIndex === targetIndex) {
+      setDragIndex(null);
+      setOverIndex(null);
+      return;
+    }
+    const next = [...steps];
+    const [moved] = next.splice(dragIndex, 1);
+    next.splice(targetIndex, 0, moved);
+    setSteps(next);
+    setDragIndex(null);
+    setOverIndex(null);
+    await reorderSteps(next.map((s, i) => ({ id: s.id, order_index: i + 1 })));
+    await load();
+  }
+
+  if (status === "loading") return <LoadingState slow={slow} />;
+  if (status === "error") return <ErrorState message={error!} onRetry={retry} />;
+  if (!test || !testId) return null;
 
   return (
     <div className="min-h-screen bg-bg text-text">
@@ -96,19 +187,43 @@ export default function Steps() {
           { label: "Report", to: `/admin/tests/${testId}/report` },
         ]}
       />
-      <div className="max-w-[1240px] mx-auto px-8 py-7">
-        <h1 className="text-[22px] font-bold m-0 mb-1">{test.name} — Steps</h1>
-        <div className="text-[12.5px] text-text-3 mb-5">Click a step's name or Required/Optional to edit it</div>
-
+      <PageHeader>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-[22px] font-bold m-0">{test.name} — Steps</h1>
+          <RefreshButton onClick={handleRefresh} loading={refreshing} />
+        </div>
+        <div className="text-[12.5px] text-text-3 mt-1">
+          Drag the handle to reorder. Click a step's name or Required/Optional to edit it.
+        </div>
+      </PageHeader>
+      <div className="max-w-[1240px] mx-auto px-8 pt-5 pb-7">
         <div className="bg-surface border border-border rounded-[10px] divide-y divide-border-soft mb-4">
           {steps.map((s, i) => (
-            <StepRow key={s.id} step={s} index={i} onSaved={load} />
+            <StepRow
+              key={s.id}
+              step={s}
+              index={i}
+              dragging={dragIndex === i}
+              dropTarget={overIndex === i}
+              onDragStart={setDragIndex}
+              onDragOver={setOverIndex}
+              onDrop={handleDrop}
+              onDragEnd={() => {
+                setDragIndex(null);
+                setOverIndex(null);
+              }}
+              onSaved={load}
+              onDelete={handleDelete}
+            />
           ))}
           {steps.length === 0 && <div className="px-4 py-6 text-center text-text-3">No steps configured yet.</div>}
         </div>
 
         {adding ? (
           <form onSubmit={handleAdd} className="flex items-center gap-2 max-w-md">
+            <span className="text-danger text-[13px] shrink-0" title="Required">
+              *
+            </span>
             <input
               autoFocus
               required

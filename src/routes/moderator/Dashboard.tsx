@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getTest, listCandidates, listSteps } from "../../lib/staffApi";
 import type { CandidateListItem, Step, Test } from "../../types";
 import { formatTime, OUTCOME_TEXT_COLOR } from "../../lib/outcome";
+import { ErrorState, LoadingState, PageHeader, RefreshButton } from "../../components/ui";
 import { TopNav } from "../staff/TopNav";
+import { useAsyncLoad } from "../../lib/useAsyncLoad";
 
 export default function ModeratorDashboard() {
   const { testId } = useParams<{ testId: string }>();
@@ -12,19 +14,30 @@ export default function ModeratorDashboard() {
   const [steps, setSteps] = useState<Step[]>([]);
   const [candidates, setCandidates] = useState<CandidateListItem[]>([]);
   const [search, setSearch] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
+  async function load() {
     if (!testId) return;
-    Promise.all([getTest(testId), listSteps(testId), listCandidates(testId)]).then(([t, s, c]) => {
-      setTest(t);
-      setSteps(s);
-      setCandidates(c);
-    });
-  }, [testId]);
-
-  if (!test || !testId) {
-    return <div className="min-h-screen bg-bg flex items-center justify-center text-text-2 text-sm">Loading…</div>;
+    const [t, s, c] = await Promise.all([getTest(testId), listSteps(testId), listCandidates(testId)]);
+    setTest(t);
+    setSteps(s);
+    setCandidates(c);
   }
+
+  const { status, error, slow, retry } = useAsyncLoad(load, [testId]);
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  if (status === "loading") return <LoadingState slow={slow} />;
+  if (status === "error") return <ErrorState message={error!} onRetry={retry} />;
+  if (!test || !testId) return null;
 
   const filtered = candidates.filter((c) => c.email.toLowerCase().includes(search.toLowerCase()));
   const completedAllSteps = candidates.filter((c) => steps.every((s) => c.step_outcomes[s.id]?.outcome)).length;
@@ -43,10 +56,14 @@ export default function ModeratorDashboard() {
           { label: "Live Monitoring", to: `/moderator/tests/${testId}/live` },
         ]}
       />
-      <div className="max-w-[1240px] mx-auto px-8 py-7">
-        <h1 className="text-[22px] font-bold m-0 mb-1">{test.name}</h1>
-        <div className="text-[12.5px] text-text-3 mb-5">Your assigned candidates</div>
-
+      <PageHeader>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-[22px] font-bold m-0">{test.name}</h1>
+          <RefreshButton onClick={handleRefresh} loading={refreshing} />
+        </div>
+        <div className="text-[12.5px] text-text-3 mt-1">Your assigned candidates</div>
+      </PageHeader>
+      <div className="max-w-[1240px] mx-auto px-8 pt-5 pb-7">
         <div className="grid grid-cols-4 gap-3 mb-5">
           {[
             ["Assigned", candidates.length, "text-text"],

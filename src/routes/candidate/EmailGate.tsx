@@ -54,7 +54,7 @@ export default function EmailGate() {
           </p>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div>
-              <FieldLabel>Email</FieldLabel>
+              <FieldLabel required>Email</FieldLabel>
               <Input
                 type="email"
                 required

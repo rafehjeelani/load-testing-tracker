@@ -1,8 +1,24 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useParams } from "react-router-dom";
-import { getTest, listCandidates, listModerators, listSteps } from "../../lib/staffApi";
-import type { CandidateListItem, Moderator, Step, Test } from "../../types";
+import { getTest, listCandidates, listIssuesForTest, listModerators, listSteps } from "../../lib/staffApi";
+import type { CandidateListItem, Issue, Moderator, Step, Test } from "../../types";
+import { formatTime } from "../../lib/outcome";
+import { ErrorState, LoadingState, PageHeader, RefreshButton } from "../../components/ui";
 import { TopNav } from "../staff/TopNav";
+import { useAsyncLoad } from "../../lib/useAsyncLoad";
+
+const OUTCOME_DOT_COLOR: Record<string, string> = {
+  without_issues: "var(--success)",
+  with_issues: "var(--warning)",
+  unable: "var(--danger)",
+};
+
+interface TimelineEvent {
+  time: number;
+  kind: "step" | "issue";
+  label: string;
+  outcome?: string;
+}
 
 export default function Report() {
   const { testId } = useParams<{ testId: string }>();
@@ -10,22 +26,39 @@ export default function Report() {
   const [steps, setSteps] = useState<Step[]>([]);
   const [candidates, setCandidates] = useState<CandidateListItem[]>([]);
   const [moderators, setModerators] = useState<Moderator[]>([]);
+  const [issues, setIssues] = useState<(Issue & { candidate_email: string })[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
+  async function load() {
     if (!testId) return;
-    Promise.all([getTest(testId), listSteps(testId), listCandidates(testId), listModerators()]).then(
-      ([t, s, c, m]) => {
-        setTest(t);
-        setSteps([...s].sort((a, b) => a.order_index - b.order_index));
-        setCandidates(c);
-        setModerators(m);
-      },
-    );
-  }, [testId]);
-
-  if (!test || !testId) {
-    return <div className="min-h-screen bg-bg flex items-center justify-center text-text-2 text-sm">Loading…</div>;
+    const [t, s, c, m, iss] = await Promise.all([
+      getTest(testId),
+      listSteps(testId),
+      listCandidates(testId),
+      listModerators(),
+      listIssuesForTest(testId),
+    ]);
+    setTest(t);
+    setSteps([...s].sort((a, b) => a.order_index - b.order_index));
+    setCandidates(c);
+    setModerators(m);
+    setIssues(iss);
   }
+
+  const { status, error, slow, retry } = useAsyncLoad(load, [testId]);
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  if (status === "loading") return <LoadingState slow={slow} />;
+  if (status === "error") return <ErrorState message={error!} onRetry={retry} />;
+  if (!test || !testId) return null;
 
   const registered = candidates.length;
   const startedForm = candidates.filter((c) => Object.values(c.step_outcomes).some((r) => r.outcome)).length;
@@ -63,6 +96,54 @@ export default function Report() {
     return { step: s, attempted, successful, issues, unable, issueRate };
   });
 
+  const timelineRows = candidates
+    .map((c) => {
+      const events: TimelineEvent[] = [];
+      for (const s of steps) {
+        const r = c.step_outcomes[s.id];
+        if (r?.saved_at) {
+          events.push({ time: new Date(r.saved_at).getTime(), kind: "step", label: s.name, outcome: r.outcome ?? undefined });
+        }
+      }
+      for (const iss of issues) {
+        if (iss.candidate_email !== c.email) continue;
+        const stepName = iss.custom_step_name ?? steps.find((s) => s.id === iss.step_id)?.name ?? "Issue";
+        events.push({ time: new Date(iss.created_at).getTime(), kind: "issue", label: stepName });
+      }
+      events.sort((a, b) => a.time - b.time);
+      return { email: c.email, events };
+    })
+    .filter((row) => row.events.length > 0)
+    .sort((a, b) => a.email.localeCompare(b.email));
+
+  const allTimes = timelineRows.flatMap((r) => r.events.map((e) => e.time));
+  const minTime = allTimes.length ? Math.min(...allTimes) : 0;
+  const maxTime = allTimes.length ? Math.max(...allTimes) : 0;
+  const timeSpan = maxTime - minTime || 1;
+
+  const CHART_W = 1000;
+  const MARGIN_LEFT = 200;
+  const MARGIN_RIGHT = 20;
+  const MARGIN_TOP = 26;
+  const ROW_H = 26;
+  const plotW = CHART_W - MARGIN_LEFT - MARGIN_RIGHT;
+  const chartH = MARGIN_TOP + timelineRows.length * ROW_H + 10;
+
+  function xForTime(t: number) {
+    return MARGIN_LEFT + ((t - minTime) / timeSpan) * plotW;
+  }
+
+  const axisTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => ({
+    x: MARGIN_LEFT + f * plotW,
+    label: new Date(minTime + f * timeSpan).toLocaleString([], {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    }),
+  }));
+
   const modRows = moderators.map((m) => {
     const mine = candidates.filter((c) => c.moderator_id === m.id);
     return {
@@ -85,9 +166,13 @@ export default function Report() {
           { label: "Report", to: `/admin/tests/${testId}/report` },
         ]}
       />
-      <div className="max-w-[1240px] mx-auto px-8 py-7">
-        <h1 className="text-[22px] font-bold m-0 mb-5">{test.name} — Report</h1>
-
+      <PageHeader>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-[22px] font-bold m-0">{test.name} — Report</h1>
+          <RefreshButton onClick={handleRefresh} loading={refreshing} />
+        </div>
+      </PageHeader>
+      <div className="max-w-[1240px] mx-auto px-8 pt-5 pb-7">
         <div className="grid grid-cols-5 gap-3 mb-8">
           {[
             ["Registered", registered, "text-text"],
@@ -108,12 +193,14 @@ export default function Report() {
           <div className="bg-surface border border-border rounded-[10px] p-5.5">
             {funnel.map((f) => (
               <div key={f.name} className="flex items-center gap-4 mb-2">
-                <div className="w-40 text-[13px] font-semibold">{f.name}</div>
-                <div
-                  className="h-7 rounded-md bg-accent"
-                  style={{ width: `${maxFunnel ? (f.count / maxFunnel) * 100 : 0}%` }}
-                />
-                <div className="font-mono-tabular text-[13px] font-semibold ml-auto">
+                <div className="w-40 text-[13px] font-semibold shrink-0">{f.name}</div>
+                <div className="flex-1 min-w-0">
+                  <div
+                    className="h-7 rounded-md bg-accent"
+                    style={{ width: `${maxFunnel ? (f.count / maxFunnel) * 100 : 0}%` }}
+                  />
+                </div>
+                <div className="font-mono-tabular text-[13px] font-semibold shrink-0 whitespace-nowrap min-w-[72px] text-right">
                   {f.count} · {maxFunnel ? Math.round((f.count / maxFunnel) * 100) : 0}%
                 </div>
               </div>
@@ -138,6 +225,108 @@ export default function Report() {
           </div>
         </div>
 
+        <div className="mb-1 font-bold text-[15px]">Session Timeline</div>
+        <div className="text-[12.5px] text-text-3 mb-3">
+          Every step save and logged issue, plotted against real time per candidate.
+        </div>
+        <div className="bg-surface border border-border rounded-[10px] p-5.5 mb-8">
+          {timelineRows.length === 0 ? (
+            <div className="text-[13px] text-text-3 text-center py-6">No session activity yet.</div>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <svg viewBox={`0 0 ${CHART_W} ${chartH}`} width="100%" style={{ minWidth: 640 }}>
+                  {axisTicks.map((t, i) => (
+                    <g key={i}>
+                      <line x1={t.x} y1={MARGIN_TOP - 8} x2={t.x} y2={chartH - 4} stroke="var(--border)" strokeWidth={1} />
+                      <text x={t.x} y={14} fontSize={10} fill="var(--text-3)" textAnchor="middle">
+                        {t.label}
+                      </text>
+                    </g>
+                  ))}
+
+                  {timelineRows.map((row, i) => {
+                    const y = MARGIN_TOP + i * ROW_H + ROW_H / 2;
+                    return (
+                      <g key={row.email}>
+                        <line
+                          x1={MARGIN_LEFT}
+                          y1={y}
+                          x2={CHART_W - MARGIN_RIGHT}
+                          y2={y}
+                          stroke="var(--border-soft)"
+                          strokeWidth={1}
+                        />
+                        <text x={MARGIN_LEFT - 10} y={y + 4} fontSize={11} fill="var(--text-2)" textAnchor="end">
+                          {row.email.length > 26 ? `${row.email.slice(0, 24)}…` : row.email}
+                        </text>
+                        {row.events.length > 1 && (
+                          <polyline
+                            fill="none"
+                            stroke="var(--border)"
+                            strokeWidth={1.5}
+                            points={row.events.map((e) => `${xForTime(e.time)},${y}`).join(" ")}
+                          />
+                        )}
+                        {row.events.map((e, j) =>
+                          e.kind === "issue" ? (
+                            <rect
+                              key={j}
+                              x={xForTime(e.time) - 4}
+                              y={y - 4}
+                              width={8}
+                              height={8}
+                              transform={`rotate(45 ${xForTime(e.time)} ${y})`}
+                              fill="var(--danger)"
+                            >
+                              <title>
+                                {row.email} · Issue during {e.label} · {formatTime(new Date(e.time).toISOString())}
+                              </title>
+                            </rect>
+                          ) : (
+                            <circle
+                              key={j}
+                              cx={xForTime(e.time)}
+                              cy={y}
+                              r={4.5}
+                              fill={OUTCOME_DOT_COLOR[e.outcome ?? ""] ?? "var(--text-3)"}
+                            >
+                              <title>
+                                {row.email} · {e.label} · {formatTime(new Date(e.time).toISOString())}
+                              </title>
+                            </circle>
+                          ),
+                        )}
+                      </g>
+                    );
+                  })}
+                </svg>
+              </div>
+              <div className="flex items-center gap-5 flex-wrap mt-3 text-[12px] text-text-2">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: "var(--success)" }} />
+                  Step without issues
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: "var(--warning)" }} />
+                  Step with issues
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: "var(--danger)" }} />
+                  Step: unable to complete
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span
+                    className="w-2.5 h-2.5 inline-block"
+                    style={{ background: "var(--danger)", transform: "rotate(45deg)" }}
+                  />
+                  Issue / disconnection logged
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+
         <div className="mb-3 font-bold text-[15px]">Step-Level Performance</div>
         <div className="bg-surface border border-border rounded-[10px] overflow-x-auto mb-8">
           <table className="w-full text-[13.5px]">
@@ -147,7 +336,7 @@ export default function Report() {
                   <th
                     key={h}
                     className={`px-4 py-2.5 text-[11.5px] font-semibold text-text-3 uppercase tracking-wide border-b border-border ${
-                      i === 0 ? "text-left" : "text-right"
+                      i === 0 ? "text-left" : "text-center"
                     }`}
                   >
                     {h}
@@ -159,12 +348,12 @@ export default function Report() {
               {stepStats.map((s) => (
                 <tr key={s.step.id} className="border-b border-border-soft last:border-0">
                   <td className="px-4 py-2.5 font-semibold">{s.step.name}</td>
-                  <td className="px-4 py-2.5 text-right font-mono-tabular">{s.attempted}</td>
-                  <td className="px-4 py-2.5 text-right font-mono-tabular">{s.successful}</td>
-                  <td className="px-4 py-2.5 text-right font-mono-tabular">{s.issues}</td>
-                  <td className="px-4 py-2.5 text-right font-mono-tabular">{s.unable}</td>
+                  <td className="px-4 py-2.5 text-center font-mono-tabular">{s.attempted}</td>
+                  <td className="px-4 py-2.5 text-center font-mono-tabular">{s.successful}</td>
+                  <td className="px-4 py-2.5 text-center font-mono-tabular">{s.issues}</td>
+                  <td className="px-4 py-2.5 text-center font-mono-tabular">{s.unable}</td>
                   <td
-                    className={`px-4 py-2.5 text-right font-mono-tabular font-semibold ${
+                    className={`px-4 py-2.5 text-center font-mono-tabular font-semibold ${
                       s.issueRate > 0 ? "text-warning" : "text-success"
                     }`}
                   >
@@ -186,7 +375,7 @@ export default function Report() {
                   <th
                     key={h}
                     className={`px-4 py-2.5 text-[11.5px] font-semibold text-text-3 uppercase tracking-wide border-b border-border ${
-                      i === 0 ? "text-left" : "text-right"
+                      i === 0 ? "text-left" : "text-center"
                     }`}
                   >
                     {h}
@@ -198,10 +387,10 @@ export default function Report() {
               {modRows.map((r) => (
                 <tr key={r.moderator.id} className="border-b border-border-soft last:border-0">
                   <td className="px-4 py-2.5 font-semibold">{r.moderator.full_name}</td>
-                  <td className="px-4 py-2.5 text-right font-mono-tabular">{r.assigned}</td>
-                  <td className="px-4 py-2.5 text-right font-mono-tabular">{r.completed}</td>
-                  <td className="px-4 py-2.5 text-right font-mono-tabular">{r.withIssues}</td>
-                  <td className="px-4 py-2.5 text-right font-mono-tabular">{r.blocked}</td>
+                  <td className="px-4 py-2.5 text-center font-mono-tabular">{r.assigned}</td>
+                  <td className="px-4 py-2.5 text-center font-mono-tabular">{r.completed}</td>
+                  <td className="px-4 py-2.5 text-center font-mono-tabular">{r.withIssues}</td>
+                  <td className="px-4 py-2.5 text-center font-mono-tabular">{r.blocked}</td>
                 </tr>
               ))}
             </tbody>

@@ -1,10 +1,12 @@
 import { supabase } from "./supabase";
+import { sanitizeFilename } from "./storagePath";
 import type {
   CandidateFull,
   CandidateListItem,
   Issue,
   Moderator,
   Profile,
+  StaffRole,
   Step,
   StepReport,
   Test,
@@ -99,6 +101,11 @@ export async function createTest(name: string): Promise<Test> {
   return data as Test;
 }
 
+export async function updateTestName(testId: string, name: string) {
+  const { error } = await supabase.from("tests").update({ name }).eq("id", testId);
+  if (error) throw new StaffApiError(error.message);
+}
+
 // --- Steps ---
 
 export function listSteps(testId: string): Promise<Step[]> {
@@ -118,23 +125,56 @@ export async function addStep(testId: string, name: string, orderIndex: number, 
   if (error) throw new StaffApiError(error.message);
 }
 
+/** Copies every step from one test into another, preserving order and required flags. */
+export async function copyStepsFromTest(sourceTestId: string, destTestId: string) {
+  const sourceSteps = await listSteps(sourceTestId);
+  if (sourceSteps.length === 0) return;
+  const { error } = await supabase.from("steps").insert(
+    sourceSteps.map((s) => ({
+      test_id: destTestId,
+      name: s.name,
+      order_index: s.order_index,
+      required: s.required,
+    })),
+  );
+  if (error) throw new StaffApiError(error.message);
+}
+
 export async function updateStep(stepId: string, patch: { name?: string; required?: boolean }) {
   const { error } = await supabase.from("steps").update(patch).eq("id", stepId);
   if (error) throw new StaffApiError(error.message);
 }
 
-// --- Moderators ---
+export async function deleteStep(stepId: string) {
+  const { error } = await supabase.from("steps").delete().eq("id", stepId);
+  if (error) throw new StaffApiError(error.message);
+}
 
-export function listModerators(): Promise<Moderator[]> {
-  return unwrap(
-    supabase.from("profiles").select("id, full_name, email").eq("role", "moderator"),
+/** Bulk-updates order_index for a full reordered list of steps (e.g. after a drag-and-drop). */
+export async function reorderSteps(steps: { id: string; order_index: number }[]) {
+  await Promise.all(
+    steps.map(({ id, order_index }) =>
+      supabase.from("steps").update({ order_index }).eq("id", id).then(({ error }) => {
+        if (error) throw new StaffApiError(error.message);
+      }),
+    ),
   );
 }
 
-/** Admin-only: invites a new moderator by email via the create-moderator edge function. */
-export async function inviteModerator(email: string, fullName: string) {
+// --- Moderators ---
+
+/** Admins act as moderators too, so anywhere a candidate can be assigned to
+ *  "a moderator" should offer admins as well. */
+export function listModerators(): Promise<Moderator[]> {
+  return unwrap(
+    supabase.from("profiles").select("id, full_name, email, role").in("role", ["moderator", "admin"]),
+  );
+}
+
+/** Admin-only: invites a new admin or moderator by email via the create-moderator edge function. */
+export async function inviteStaff(email: string, fullName: string, role: StaffRole) {
   const { data, error } = await supabase.functions.invoke("create-moderator", {
-    body: { email, full_name: fullName },
+    body: { email, full_name: fullName, role },
   });
   if (error) throw new StaffApiError(error.message);
   if (data?.error) throw new StaffApiError(data.error);
@@ -171,7 +211,7 @@ export async function listCandidates(testId: string): Promise<CandidateListItem[
 
   const { data: reports, error: repErr } = await supabase
     .from("step_reports")
-    .select("candidate_id, step_id, outcome, saved_at, comment, evidence_path, updated_at")
+    .select("candidate_id, step_id, outcome, saved_at, comment, evidence_paths, updated_at")
     .in("candidate_id", (candidates ?? []).map((c) => c.id));
   if (repErr) throw new StaffApiError(repErr.message);
 
@@ -182,7 +222,7 @@ export async function listCandidates(testId: string): Promise<CandidateListItem[
       outcome: r.outcome,
       saved_at: r.saved_at,
       comment: r.comment,
-      evidence_path: r.evidence_path,
+      evidence_paths: r.evidence_paths ?? [],
       updated_at: r.updated_at,
     };
     byCandidate.set(r.candidate_id, existing);
@@ -203,6 +243,17 @@ export async function addCandidate(testId: string, email: string) {
   if (error) throw new StaffApiError(error.message);
 }
 
+export async function updateCandidateEmail(candidateId: string, email: string) {
+  const { error } = await supabase.from("candidates").update({ email }).eq("id", candidateId);
+  if (error) throw new StaffApiError(error.message);
+}
+
+/** Cascades to that candidate's step_reports and issues (on delete cascade). */
+export async function deleteCandidate(candidateId: string) {
+  const { error } = await supabase.from("candidates").delete().eq("id", candidateId);
+  if (error) throw new StaffApiError(error.message);
+}
+
 export async function assignModerator(candidateId: string, moderatorId: string | null) {
   const { error } = await supabase
     .from("candidates")
@@ -217,7 +268,7 @@ export async function listIssuesForTest(
 ): Promise<(Issue & { candidate_email: string })[]> {
   const { data, error } = await supabase
     .from("issues")
-    .select("id, step_id, custom_step_name, comment, evidence_path, created_at, candidates!inner(email, test_id)")
+    .select("id, step_id, custom_step_name, comment, evidence_paths, created_at, candidates!inner(email, test_id)")
     .eq("candidates.test_id", testId);
   if (error) throw new StaffApiError(error.message);
   return (data ?? []).map((row) => {
@@ -238,20 +289,20 @@ export async function getCandidateFull(candidateId: string): Promise<CandidateFu
 
   const { data: step_reports, error: srErr } = await supabase
     .from("step_reports")
-    .select("step_id, outcome, comment, evidence_path, saved_at")
+    .select("step_id, outcome, comment, evidence_paths, saved_at")
     .eq("candidate_id", candidateId);
   if (srErr) throw new StaffApiError(srErr.message);
 
   const { data: issues, error: iErr } = await supabase
     .from("issues")
-    .select("id, step_id, custom_step_name, comment, evidence_path, created_at")
+    .select("id, step_id, custom_step_name, comment, evidence_paths, created_at")
     .eq("candidate_id", candidateId)
     .order("created_at");
   if (iErr) throw new StaffApiError(iErr.message);
 
   return {
     candidate,
-    step_reports: (step_reports ?? []) as StepReport[],
+    step_reports: ((step_reports ?? []) as StepReport[]).map((r) => ({ ...r, evidence_paths: r.evidence_paths ?? [] })),
     issues: (issues ?? []) as Issue[],
   };
 }
@@ -261,7 +312,7 @@ export async function upsertStepReportStaff(
   stepId: string,
   outcome: string | null,
   comment: string,
-  evidencePath: string | null,
+  evidencePaths: string[],
   stampSavedAt: boolean,
 ) {
   const payload: Record<string, unknown> = {
@@ -269,7 +320,7 @@ export async function upsertStepReportStaff(
     step_id: stepId,
     outcome,
     comment,
-    evidence_path: evidencePath,
+    evidence_paths: evidencePaths,
     updated_at: new Date().toISOString(),
   };
   if (stampSavedAt) payload.saved_at = new Date().toISOString();
@@ -280,20 +331,36 @@ export async function upsertStepReportStaff(
   if (error) throw new StaffApiError(error.message);
 }
 
+/** Lets staff manually correct the "saved at" time shown for a step (e.g. to
+ *  match when the candidate says it actually happened). */
+export async function updateStepReportSavedAt(candidateId: string, stepId: string, savedAtIso: string) {
+  const { error } = await supabase
+    .from("step_reports")
+    .update({ saved_at: savedAtIso })
+    .eq("candidate_id", candidateId)
+    .eq("step_id", stepId);
+  if (error) throw new StaffApiError(error.message);
+}
+
 export async function addIssueStaff(
   candidateId: string,
   stepId: string | null,
   customStepName: string | null,
   comment: string,
-  evidencePath: string,
+  evidencePaths: string[],
 ) {
   const { error } = await supabase.from("issues").insert({
     candidate_id: candidateId,
     step_id: stepId,
     custom_step_name: customStepName,
     comment,
-    evidence_path: evidencePath,
+    evidence_paths: evidencePaths,
   });
+  if (error) throw new StaffApiError(error.message);
+}
+
+export async function updateIssueTimestamp(issueId: string, createdAtIso: string) {
+  const { error } = await supabase.from("issues").update({ created_at: createdAtIso }).eq("id", issueId);
   if (error) throw new StaffApiError(error.message);
 }
 
@@ -306,7 +373,7 @@ export async function submitFormStaff(candidateId: string) {
 }
 
 export async function uploadEvidenceStaff(testId: string, candidateId: string, file: File) {
-  const path = `${testId}/${candidateId}/${Date.now()}-${file.name}`;
+  const path = `${testId}/${candidateId}/${Date.now()}-${sanitizeFilename(file.name)}`;
   const { error } = await supabase.storage.from("evidence").upload(path, file);
   if (error) throw new StaffApiError(error.message);
   return path;

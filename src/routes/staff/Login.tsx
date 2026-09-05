@@ -82,7 +82,7 @@ export default function Login({ role }: { role: StaffRole }) {
             <h1 className="text-[17px] font-bold text-center mb-6">{title}</h1>
             <form onSubmit={handleSubmit} className="flex flex-col gap-3.5">
               <div>
-                <FieldLabel>Email</FieldLabel>
+                <FieldLabel required>Email</FieldLabel>
                 <Input
                   type="email"
                   required
@@ -92,7 +92,7 @@ export default function Login({ role }: { role: StaffRole }) {
                 />
               </div>
               <div>
-                <FieldLabel>Password</FieldLabel>
+                <FieldLabel required>Password</FieldLabel>
                 <Input
                   type="password"
                   required
@@ -134,7 +134,7 @@ export default function Login({ role }: { role: StaffRole }) {
             ) : (
               <form onSubmit={handleResetRequest} className="flex flex-col gap-3.5">
                 <div>
-                  <FieldLabel>Email</FieldLabel>
+                  <FieldLabel required>Email</FieldLabel>
                   <Input
                     type="email"
                     required

@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { sanitizeFilename } from "./storagePath";
 import type { CandidateState, Outcome } from "../types";
 
 export class CandidateApiError extends Error {}
@@ -25,7 +26,7 @@ export function upsertStepReport(
   stepId: string,
   outcome: Outcome | null,
   comment: string,
-  evidencePath: string | null,
+  evidencePaths: string[],
 ) {
   return callRpc<{ ok: true; saved_at: string | null }>("rpc_upsert_step_report", {
     p_test_slug: testSlug,
@@ -33,7 +34,7 @@ export function upsertStepReport(
     p_step_id: stepId,
     p_outcome: outcome,
     p_comment: comment,
-    p_evidence_path: evidencePath,
+    p_evidence_paths: evidencePaths,
   });
 }
 
@@ -43,7 +44,7 @@ export function addIssue(
   stepId: string | null,
   customStepName: string | null,
   comment: string,
-  evidencePath: string,
+  evidencePaths: string[],
 ) {
   return callRpc<{ ok: true }>("rpc_add_issue", {
     p_test_slug: testSlug,
@@ -51,7 +52,7 @@ export function addIssue(
     p_step_id: stepId,
     p_custom_step_name: customStepName,
     p_comment: comment,
-    p_evidence_path: evidencePath,
+    p_evidence_paths: evidencePaths,
   });
 }
 
@@ -69,8 +70,16 @@ export async function uploadEvidence(
   file: File,
 ): Promise<string> {
   const safeEmail = email.replace(/[^a-zA-Z0-9]/g, "_");
-  const path = `${testSlug}/${safeEmail}/${Date.now()}-${file.name}`;
+  const path = `${testSlug}/${safeEmail}/${Date.now()}-${sanitizeFilename(file.name)}`;
   const { error } = await supabase.storage.from("evidence").upload(path, file);
   if (error) throw new CandidateApiError(error.message);
   return path;
+}
+
+/** Signed URL so a candidate can view/download evidence they submitted in an
+ *  earlier page load (once the transient local preview is gone). */
+export async function getEvidenceViewUrl(path: string): Promise<string> {
+  const { data, error } = await supabase.storage.from("evidence").createSignedUrl(path, 60);
+  if (error) throw new CandidateApiError(error.message);
+  return data.signedUrl;
 }

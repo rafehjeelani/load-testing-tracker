@@ -1,81 +1,78 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import type { Outcome } from "../../types";
-import { Textarea } from "../../components/ui";
-
-const OUTCOME_LABEL: Record<Outcome, string> = {
-  without_issues: "Completed without issues",
-  with_issues: "Completed with issues",
-  unable: "Was not able to complete",
-};
-
-const OUTCOME_COLOR: Record<Outcome, string> = {
-  without_issues: "text-success",
-  with_issues: "text-warning",
-  unable: "text-danger",
-};
+import { FieldLabel, Textarea } from "../../components/ui";
+import EvidenceList from "../../components/EvidenceList";
+import { OUTCOME_LABEL, OUTCOME_TEXT_COLOR, formatTime } from "../../lib/outcome";
 
 interface Props {
-  stepId: string;
   name: string;
+  stepRequired: boolean;
   radioGroup: string;
   initialOutcome: Outcome | null;
   initialComment: string;
-  initialEvidencePath: string | null;
+  initialEvidencePaths: string[];
   initialSavedAt: string | null;
-  onSave: (outcome: Outcome | null, comment: string, evidencePath: string | null) => Promise<{ saved_at: string | null } | void>;
+  onSave: (outcome: Outcome | null, comment: string, evidencePaths: string[]) => Promise<{ saved_at: string | null } | void>;
   onUpload: (file: File) => Promise<string>;
+  onViewEvidence: (path: string) => Promise<string>;
 }
 
 export default function StepRow({
   name,
+  stepRequired,
   radioGroup,
   initialOutcome,
   initialComment,
-  initialEvidencePath,
+  initialEvidencePaths,
   initialSavedAt,
   onSave,
   onUpload,
+  onViewEvidence,
 }: Props) {
   const [outcome, setOutcome] = useState<Outcome | null>(initialOutcome);
   const [comment, setComment] = useState(initialComment);
-  const [evidencePath, setEvidencePath] = useState<string | null>(initialEvidencePath);
+  const [evidencePaths, setEvidencePaths] = useState<string[]>(initialEvidencePaths);
   const [savedAt, setSavedAt] = useState<string | null>(initialSavedAt);
-  const [uploading, setUploading] = useState(false);
-  const fileInput = useRef<HTMLInputElement>(null);
+  const commentRequired = outcome === "with_issues" || outcome === "unable";
 
   async function handleOutcomeChange(next: Outcome) {
     setOutcome(next);
-    const result = await onSave(next, comment, evidencePath);
+    const result = await onSave(next, comment, evidencePaths);
     if (result?.saved_at) setSavedAt(result.saved_at);
   }
 
   async function handleCommentBlur() {
     if (comment === initialComment) return;
-    await onSave(outcome, comment, evidencePath);
+    await onSave(outcome, comment, evidencePaths);
   }
 
-  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    try {
-      const path = await onUpload(file);
-      setEvidencePath(path);
-      await onSave(outcome, comment, path);
-    } finally {
-      setUploading(false);
-    }
+  async function handleAddEvidence(path: string) {
+    const next = [...evidencePaths, path];
+    setEvidencePaths(next);
+    await onSave(outcome, comment, next);
   }
 
-  const evidenceFilename = evidencePath?.split("/").pop();
+  async function handleRemoveEvidence(path: string) {
+    const next = evidencePaths.filter((p) => p !== path);
+    setEvidencePaths(next);
+    await onSave(outcome, comment, next);
+  }
 
   return (
     <div className="bg-surface border border-border rounded-[10px] p-5 mb-3">
       <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
-        <div className="font-semibold text-sm">{name}</div>
+        <div className="font-semibold text-sm">
+          {name}
+          {stepRequired && (
+            <span className="text-danger" title="Required">
+              {" "}
+              *
+            </span>
+          )}
+        </div>
         {outcome ? (
-          <div className={`font-mono-tabular text-[11.5px] ${OUTCOME_COLOR[outcome]}`}>
-            Saved {savedAt ? new Date(savedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : ""}
+          <div className={`font-mono-tabular text-[11.5px] ${OUTCOME_TEXT_COLOR[outcome]}`}>
+            Saved {formatTime(savedAt)}
           </div>
         ) : (
           <div className="font-mono-tabular text-[11.5px] text-text-3">Not yet reported</div>
@@ -96,41 +93,27 @@ export default function StepRow({
         ))}
       </div>
 
+      <FieldLabel required={commentRequired}>Comment</FieldLabel>
       <Textarea
-        placeholder="Add a comment (optional)"
+        placeholder={commentRequired ? "Describe what happened" : "Add a comment (optional)"}
+        required={commentRequired}
         value={comment}
         onChange={(e) => setComment(e.target.value)}
         onBlur={handleCommentBlur}
         className="min-h-[56px] mb-2"
       />
 
-      {evidencePath ? (
-        <div className="border border-border rounded-[7px] px-3.5 py-2.5 text-[12.5px] text-text-2 bg-surface-2 flex items-center gap-2">
-          <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth={2}>
-            <path d="M20 6L9 17l-5-5" />
-          </svg>
-          {evidenceFilename}
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => fileInput.current?.click()}
-          disabled={uploading}
-          className="w-full border border-dashed border-danger-border rounded-[7px] px-3.5 py-2.5 text-[12.5px] text-text-3 flex items-center gap-2 cursor-pointer"
-        >
-          <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path d="M12 3v13" />
-            <path d="M7 8l5-5 5 5" />
-            <path d="M5 21h14" />
-          </svg>
-          {uploading ? "Uploading…" : (
-            <>
-              Attach evidence <span className="text-danger">(required)</span>
-            </>
-          )}
-        </button>
-      )}
-      <input ref={fileInput} type="file" className="hidden" onChange={handleFileChange} />
+      <EvidenceList
+        paths={evidencePaths}
+        onAdd={handleAddEvidence}
+        onRemove={handleRemoveEvidence}
+        onUpload={onUpload}
+        onDownload={async (path) => {
+          window.open(await onViewEvidence(path), "_blank");
+        }}
+        getPreviewUrl={onViewEvidence}
+        required
+      />
     </div>
   );
 }

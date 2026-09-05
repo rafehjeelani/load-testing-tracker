@@ -12,7 +12,10 @@ export default function RequireRole({ role }: { role: StaffRole }) {
   if (!profile) {
     return <Navigate to={`/${role}/login`} replace />;
   }
-  if (profile.role !== role) {
+  // Admins are moderators by default -- they can reach the moderator
+  // console (to work candidates assigned to them) in addition to /admin.
+  const isModeratorByDefault = role === "moderator" && profile.role === "admin";
+  if (profile.role !== role && !isModeratorByDefault) {
     // Signed in, but as the other role -- send them to their own console.
     return <Navigate to={`/${profile.role}`} replace />;
   }

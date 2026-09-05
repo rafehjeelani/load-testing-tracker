@@ -16,7 +16,7 @@ export function TopNav({
   tabs?: NavTab[];
 }) {
   return (
-    <div className="border-b border-border bg-surface">
+    <div className="sticky top-0 z-30 border-b border-border bg-surface">
       <div className="max-w-[1240px] mx-auto px-8 h-[52px] flex items-center gap-2">
         <NavLink to={brandTo} className="flex items-center gap-2 mr-7 shrink-0">
           <Logo size={20} />

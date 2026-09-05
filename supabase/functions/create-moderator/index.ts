@@ -5,10 +5,13 @@
 // happen server-side. This function does that: it verifies the caller is
 // a signed-in admin, then uses the service role (available automatically
 // inside every Edge Function as SUPABASE_SERVICE_ROLE_KEY) to invite the
-// new moderator by email and create their `profiles` row.
+// new staff member by email and create their `profiles` row -- as either
+// a moderator or another admin, per the `role` field in the request body.
 //
 // Deploy via the Supabase dashboard: Edge Functions -> Create a new
 // function -> name it "create-moderator" -> paste this file's contents.
+// (Kept the original function name on the redeploy so no new function
+// needs to be created in the dashboard -- just replace the code.)
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const APP_RESET_PASSWORD_URL = "https://rafehjeelani.github.io/load-testing-tracker/reset-password";
@@ -50,8 +53,12 @@ Deno.serve(async (req) => {
       .single();
     if (profile?.role !== "admin") return json({ error: "Only admins can invite moderators" }, 403);
 
-    const { email, full_name } = await req.json();
+    const { email, full_name, role } = await req.json();
     if (!email || !full_name) return json({ error: "email and full_name are required" }, 400);
+    const targetRole = role ?? "moderator";
+    if (targetRole !== "admin" && targetRole !== "moderator") {
+      return json({ error: "role must be 'admin' or 'moderator'" }, 400);
+    }
 
     // Elevated client -- service role bypasses RLS, used only for the two
     // admin-only operations below (never returned to the browser).
@@ -66,7 +73,7 @@ Deno.serve(async (req) => {
 
     const { error: profileErr } = await adminClient.from("profiles").insert({
       id: invited.user.id,
-      role: "moderator",
+      role: targetRole,
       full_name,
       email,
     });
