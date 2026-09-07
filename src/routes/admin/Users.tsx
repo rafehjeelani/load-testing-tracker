@@ -6,6 +6,7 @@ import {
   inviteStaff,
   listAllUsers,
   requestPasswordReset,
+  setUserActive,
   StaffApiError,
   updateUserEmailAdmin,
   updateUserFullName,
@@ -73,6 +74,7 @@ export default function Users() {
   const [resettingId, setResettingId] = useState<string | null>(null);
   const [resetSentId, setResetSentId] = useState<string | null>(null);
   const [linkCopiedId, setLinkCopiedId] = useState<string | null>(null);
+  const [togglingActiveId, setTogglingActiveId] = useState<string | null>(null);
 
   async function load() {
     setUsers(await listAllUsers());
@@ -183,6 +185,28 @@ export default function Users() {
     }
   }
 
+  async function handleToggleActive(user: Moderator) {
+    if (user.active) {
+      const ok = window.confirm(
+        `Deactivate ${user.full_name} (${user.email})? They won't be able to sign in until reactivated. Any candidates already assigned to them stay assigned.`,
+      );
+      if (!ok) return;
+    }
+    setTogglingActiveId(user.id);
+    setRowError(null);
+    try {
+      await setUserActive(user.id, !user.active);
+      await load();
+    } catch (err) {
+      setRowError({
+        id: user.id,
+        message: err instanceof StaffApiError ? err.message : "Couldn't update that account.",
+      });
+    } finally {
+      setTogglingActiveId(null);
+    }
+  }
+
   async function handleResendReset(user: Moderator) {
     setResettingId(user.id);
     setRowError(null);
@@ -287,13 +311,16 @@ export default function Users() {
                 <th className="text-left px-4 py-2.5 text-[11.5px] font-semibold text-text-3 uppercase tracking-wide border-b border-border">
                   Role
                 </th>
-                <th className="px-4 py-2.5 border-b border-border w-[140px]" />
+                <th className="text-left px-4 py-2.5 text-[11.5px] font-semibold text-text-3 uppercase tracking-wide border-b border-border">
+                  Status
+                </th>
+                <th className="px-4 py-2.5 border-b border-border w-[168px]" />
               </tr>
             </thead>
             <tbody>
               {filteredUsers.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-4 py-6 text-center text-text-3">
+                  <td colSpan={5} className="px-4 py-6 text-center text-text-3">
                     {users.length === 0 ? "No users yet — add one to get started." : "No users match your search."}
                   </td>
                 </tr>
@@ -331,6 +358,11 @@ export default function Users() {
                           </select>
                         </td>
                         <td className="px-4 py-2.5">
+                          <Badge variant={user.active ? "success" : "warning"}>
+                            {user.active ? "Active" : "Deactivated"}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-2.5">
                           <div className="flex items-center gap-2">
                             <button
                               type="button"
@@ -364,6 +396,11 @@ export default function Users() {
                           </Badge>
                         </td>
                         <td className="px-4 py-2.5">
+                          <Badge variant={user.active ? "success" : "warning"}>
+                            {user.active ? "Active" : "Deactivated"}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-2.5">
                           <div className="flex items-center gap-2.5">
                             <button
                               type="button"
@@ -374,6 +411,26 @@ export default function Users() {
                               <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                                 <path d="M12 20h9" />
                                 <path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
+                              </svg>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleActive(user)}
+                              disabled={togglingActiveId === user.id || (user.active && isProtected(user))}
+                              className={`cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
+                                user.active ? "text-text-3 hover:text-warning" : "text-warning hover:text-success"
+                              }`}
+                              title={
+                                user.active && isProtected(user)
+                                  ? "This account is protected and can't be deactivated"
+                                  : user.active
+                                    ? "Deactivate account"
+                                    : "Reactivate account"
+                              }
+                            >
+                              <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                                <path d="M12 2v10" />
+                                <path d="M18.36 6.64a9 9 0 11-12.73 0" />
                               </svg>
                             </button>
                             <button

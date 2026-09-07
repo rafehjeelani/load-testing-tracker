@@ -6,10 +6,12 @@ export default function ModeratorSelect({
   moderators,
   value,
   onChange,
+  placeholder = "Unassigned",
 }: {
   moderators: Moderator[];
   value: string | null;
   onChange: (moderatorId: string | null) => void;
+  placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -75,7 +77,7 @@ export default function ModeratorSelect({
         onClick={() => setOpen((o) => !o)}
         className="flex items-center gap-1.5 px-2.5 py-1.5 border border-border rounded-[6px] bg-surface text-[12.5px] whitespace-nowrap cursor-pointer"
       >
-        {current?.full_name ?? "Unassigned"}
+        {current?.full_name ?? placeholder}
         <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth={2.5}>
           <path d="M6 9l6 6 6-6" />
         </svg>

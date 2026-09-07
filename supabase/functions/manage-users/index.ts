@@ -9,6 +9,12 @@
 //   - { action: "update_email", user_id, email }  -- changes the user's
 //     Supabase Auth login email AND the profiles.email column together, so
 //     the two never drift apart.
+//   - { action: "set_active", user_id, active }    -- deactivates (or
+//     reactivates) a staff account by banning/unbanning the Supabase Auth
+//     user, so they can no longer sign in. Deliberately does NOT check
+//     candidate assignments the way "delete" does -- a deactivated
+//     moderator keeps whatever candidates they already have; reassigning
+//     them is a separate, optional step for the admin.
 //   - { action: "generate_link", type: "invite" | "recovery", email,
 //       full_name?, role? }                       -- generates the same
 //     invite/reset link Supabase's own emails would contain, but *without*
@@ -111,6 +117,39 @@ Deno.serve(async (req) => {
       if (authErr) return json({ error: authErr.message }, 400);
 
       const { error: profileErr } = await adminClient.from("profiles").update({ email }).eq("id", user_id);
+      if (profileErr) return json({ error: profileErr.message }, 400);
+
+      return json({ ok: true });
+    }
+
+    if (body.action === "set_active") {
+      const { user_id, active } = body;
+      if (!user_id || typeof active !== "boolean") {
+        return json({ error: "user_id and active (boolean) are required" }, 400);
+      }
+      if (user_id === userData.user.id) {
+        return json({ error: "You can't deactivate your own account." }, 400);
+      }
+
+      if (!active) {
+        const { data: target } = await adminClient
+          .from("profiles")
+          .select("email")
+          .eq("id", user_id)
+          .single();
+        if (target?.email && PROTECTED_EMAILS.includes(target.email.toLowerCase())) {
+          return json({ error: "This account is protected and can't be deactivated." }, 400);
+        }
+      }
+
+      // ban_duration "none" lifts a ban; any other value bans for that long --
+      // ~100 years reads as permanent without relying on a magic sentinel.
+      const { error: authErr } = await adminClient.auth.admin.updateUserById(user_id, {
+        ban_duration: active ? "none" : "876000h",
+      });
+      if (authErr) return json({ error: authErr.message }, 400);
+
+      const { error: profileErr } = await adminClient.from("profiles").update({ active }).eq("id", user_id);
       if (profileErr) return json({ error: profileErr.message }, 400);
 
       return json({ ok: true });

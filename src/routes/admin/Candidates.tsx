@@ -1,8 +1,10 @@
-import { useState, type FormEvent } from "react";
+import { useState, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   addCandidate,
   assignModerator,
+  bulkAddCandidates,
+  bulkAssignModerator,
   deleteCandidate,
   listCandidates,
   listIssuesForTest,
@@ -16,10 +18,18 @@ import {
 import type { CandidateListItem, Moderator, Step, Test } from "../../types";
 import { formatTime, OUTCOME_TEXT_COLOR } from "../../lib/outcome";
 import { downloadCsv } from "../../lib/csv";
-import { Button, ErrorState, LoadingState, PageHeader, RefreshButton } from "../../components/ui";
+import { Button, ErrorState, LoadingState, Modal, PageHeader, RefreshButton } from "../../components/ui";
 import { TopNav } from "../staff/TopNav";
 import ModeratorSelect from "./ModeratorSelect";
 import { useAsyncLoad } from "../../lib/useAsyncLoad";
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+interface BulkPreview {
+  emails: string[];
+  alreadyExisting: number;
+  invalidRows: number;
+}
 
 function adminTabs(testId: string) {
   return [
@@ -56,6 +66,15 @@ export default function Candidates() {
     evidenceLinks: false,
   });
 
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkAssigning, setBulkAssigning] = useState(false);
+
+  const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
+  const [bulkPreview, setBulkPreview] = useState<BulkPreview | null>(null);
+  const [bulkParseError, setBulkParseError] = useState<string | null>(null);
+  const [bulkUploading, setBulkUploading] = useState(false);
+  const [bulkDone, setBulkDone] = useState<{ added: number } | null>(null);
+
   async function load() {
     if (!testId) return;
     const [t, s, c, m] = await Promise.all([
@@ -78,6 +97,9 @@ export default function Candidates() {
   const testSlug = test.slug;
 
   const formUrl = `${window.location.origin}${import.meta.env.BASE_URL}t/${testSlug}`;
+  // Deactivated moderators can't sign in, so assigning new candidates to them
+  // would be a dead end -- only offered here, not in per-candidate reassignment.
+  const activeModerators = moderators.filter((m) => m.active);
 
   const filtered = candidates.filter((c) => {
     if (search && !c.email.toLowerCase().includes(search.toLowerCase())) return false;
@@ -103,6 +125,110 @@ export default function Candidates() {
   async function handleAssign(candidateId: string, moderatorId: string | null) {
     setCandidates((cs) => cs.map((c) => (c.id === candidateId ? { ...c, moderator_id: moderatorId } : c)));
     await assignModerator(candidateId, moderatorId);
+  }
+
+  function toggleSelected(candidateId: string) {
+    setSelectedIds((s) => {
+      const next = new Set(s);
+      if (next.has(candidateId)) next.delete(candidateId);
+      else next.add(candidateId);
+      return next;
+    });
+  }
+
+  function toggleSelectAllFiltered() {
+    setSelectedIds((s) => {
+      const allSelected = filtered.length > 0 && filtered.every((c) => s.has(c.id));
+      const next = new Set(s);
+      for (const c of filtered) {
+        if (allSelected) next.delete(c.id);
+        else next.add(c.id);
+      }
+      return next;
+    });
+  }
+
+  async function handleBulkAssign(moderatorId: string | null) {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    setBulkAssigning(true);
+    try {
+      setCandidates((cs) => cs.map((c) => (selectedIds.has(c.id) ? { ...c, moderator_id: moderatorId } : c)));
+      await bulkAssignModerator(ids, moderatorId);
+      setSelectedIds(new Set());
+    } finally {
+      setBulkAssigning(false);
+    }
+  }
+
+  function closeBulkUpload() {
+    setBulkUploadOpen(false);
+    setBulkPreview(null);
+    setBulkParseError(null);
+    setBulkDone(null);
+  }
+
+  async function handleBulkFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // lets the same file be picked again later
+    if (!file) return;
+    setBulkParseError(null);
+    setBulkDone(null);
+    try {
+      // Loaded on demand -- xlsx is a large library and bulk upload is a
+      // rarely-used admin action, not worth adding to the main bundle.
+      const XLSX = await import("xlsx");
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, blankrows: false });
+
+      const existing = new Set(candidates.map((c) => c.email.toLowerCase()));
+      const seen = new Set<string>();
+      const emails: string[] = [];
+      let alreadyExisting = 0;
+      let invalidRows = 0;
+      for (const row of rows) {
+        const raw = String(row[0] ?? "").trim().toLowerCase();
+        if (!raw) continue;
+        if (!EMAIL_RE.test(raw)) {
+          invalidRows++;
+          continue;
+        }
+        if (seen.has(raw)) continue;
+        seen.add(raw);
+        if (existing.has(raw)) {
+          alreadyExisting++;
+          continue;
+        }
+        emails.push(raw);
+      }
+
+      if (emails.length === 0 && alreadyExisting === 0) {
+        setBulkParseError("No email addresses found in that file. Put one email per row, in the first column.");
+        setBulkPreview(null);
+        return;
+      }
+      setBulkPreview({ emails, alreadyExisting, invalidRows });
+    } catch {
+      setBulkParseError("Couldn't read that file. Make sure it's a valid .xlsx, .xls, or .csv file.");
+      setBulkPreview(null);
+    }
+  }
+
+  async function handleConfirmBulkUpload() {
+    if (!testId || !bulkPreview || bulkPreview.emails.length === 0) return;
+    setBulkUploading(true);
+    try {
+      await bulkAddCandidates(testId, bulkPreview.emails);
+      setBulkDone({ added: bulkPreview.emails.length });
+      setBulkPreview(null);
+      await load();
+    } catch (err) {
+      setBulkParseError(err instanceof StaffApiError ? err.message : "Couldn't upload those candidates.");
+    } finally {
+      setBulkUploading(false);
+    }
   }
 
   async function handleSaveEmail(candidateId: string) {
@@ -306,6 +432,14 @@ export default function Candidates() {
             ))}
           </select>
           <div className="flex-1" />
+          <Button variant="secondary" onClick={() => setBulkUploadOpen(true)} className="flex items-center gap-1.5">
+            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path d="M12 15V3" />
+              <path d="M7 8l5-5 5 5" />
+              <path d="M5 21h14" />
+            </svg>
+            Bulk Upload
+          </Button>
           <Button variant="secondary" onClick={handleExport} className="flex items-center gap-1.5">
             <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path d="M12 3v13" />
@@ -315,6 +449,28 @@ export default function Candidates() {
             Export
           </Button>
         </div>
+
+        {selectedIds.size > 0 && (
+          <div className="flex items-center gap-3 mb-4.5 bg-accent-soft border border-accent/30 rounded-[10px] px-4 py-2.5 flex-wrap">
+            <span className="text-[13px] font-semibold text-accent">{selectedIds.size} selected</span>
+            <div className="flex items-center gap-1.5 text-[13px] text-text-2">
+              Assign to
+              <ModeratorSelect
+                moderators={activeModerators}
+                value={null}
+                onChange={handleBulkAssign}
+                placeholder={bulkAssigning ? "Assigning…" : "Choose moderator"}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedIds(new Set())}
+              className="ml-auto text-[13px] text-text-3 hover:text-danger cursor-pointer"
+            >
+              Clear selection
+            </button>
+          </div>
+        )}
 
         <div className="bg-surface border border-dashed border-border rounded-[10px] p-4 mb-4.5">
           <div className="text-[11.5px] font-semibold text-text-3 uppercase tracking-wide mb-2.5">
@@ -352,6 +508,14 @@ export default function Candidates() {
           <table className="w-full text-[13.5px] min-w-[900px]">
             <thead>
               <tr className="bg-surface-2">
+                <th className="px-4 py-2.5 border-b border-border w-[36px]">
+                  <input
+                    type="checkbox"
+                    checked={filtered.length > 0 && filtered.every((c) => selectedIds.has(c.id))}
+                    onChange={toggleSelectAllFiltered}
+                    title="Select all"
+                  />
+                </th>
                 <th className="text-left px-4 py-2.5 text-[11.5px] font-semibold text-text-3 uppercase tracking-wide border-b border-border">
                   Email
                 </th>
@@ -371,7 +535,7 @@ export default function Candidates() {
             <tbody>
               {filtered.length === 0 && !adding && (
                 <tr>
-                  <td colSpan={2 + steps.length} className="px-4 py-6 text-center text-text-3">
+                  <td colSpan={3 + steps.length} className="px-4 py-6 text-center text-text-3">
                     No candidates yet.
                   </td>
                 </tr>
@@ -380,6 +544,13 @@ export default function Candidates() {
                 const hasData = c.submitted || Object.values(c.step_outcomes).some((o) => o.outcome);
                 return (
                 <tr key={c.id} className="border-b border-border-soft last:border-0 hover:bg-surface-2">
+                  <td className="px-4 py-2.5">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(c.id)}
+                      onChange={() => toggleSelected(c.id)}
+                    />
+                  </td>
                   {editingCandidateId === c.id ? (
                     <td className="px-4 py-2">
                       <div className="flex items-center gap-1.5">
@@ -484,6 +655,7 @@ export default function Candidates() {
               })}
               {adding ? (
                 <tr className="bg-accent-soft">
+                  <td />
                   <td className="px-4 py-2" colSpan={2}>
                     <form onSubmit={handleAddCandidate} className="flex items-center gap-2">
                       <span className="text-danger text-[13px] shrink-0" title="Required">
@@ -521,7 +693,7 @@ export default function Candidates() {
                 </tr>
               ) : (
                 <tr>
-                  <td colSpan={2 + steps.length} className="p-0">
+                  <td colSpan={3 + steps.length} className="p-0">
                     <button
                       type="button"
                       onClick={() => setAdding(true)}
@@ -539,6 +711,60 @@ export default function Candidates() {
           </table>
         </div>
       </div>
+
+      <Modal open={bulkUploadOpen} onClose={closeBulkUpload} title="Bulk Upload Candidates">
+        <div className="flex flex-col gap-3">
+          <p className="text-[13px] text-text-2 leading-relaxed">
+            Upload a spreadsheet with one candidate email per row, in the first column (a header row like
+            "Email" is fine — it's skipped automatically).
+          </p>
+          <input
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            onChange={handleBulkFile}
+            className="text-[13px]"
+          />
+          {bulkParseError && <div className="text-[12.5px] text-danger">{bulkParseError}</div>}
+          {bulkDone && (
+            <div className="text-[13px] text-success font-semibold">
+              Added {bulkDone.added} candidate{bulkDone.added === 1 ? "" : "s"}.
+            </div>
+          )}
+          {bulkPreview && (
+            <div className="bg-surface-2 border border-border rounded-[8px] p-3 text-[13px] flex flex-col gap-1">
+              <div className="font-semibold">
+                {bulkPreview.emails.length} new candidate{bulkPreview.emails.length === 1 ? "" : "s"} will be
+                added
+              </div>
+              {bulkPreview.alreadyExisting > 0 && (
+                <div className="text-text-3">
+                  {bulkPreview.alreadyExisting} already registered for this test — skipped
+                </div>
+              )}
+              {bulkPreview.invalidRows > 0 && (
+                <div className="text-text-3">
+                  {bulkPreview.invalidRows} row{bulkPreview.invalidRows === 1 ? "" : "s"} didn't look like a
+                  valid email — skipped
+                </div>
+              )}
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              disabled={!bulkPreview || bulkPreview.emails.length === 0 || bulkUploading}
+              onClick={handleConfirmBulkUpload}
+            >
+              {bulkUploading
+                ? "Uploading…"
+                : `Upload${bulkPreview ? ` ${bulkPreview.emails.length} Candidate${bulkPreview.emails.length === 1 ? "" : "s"}` : ""}`}
+            </Button>
+            <Button type="button" variant="ghost" onClick={closeBulkUpload}>
+              {bulkDone ? "Done" : "Cancel"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

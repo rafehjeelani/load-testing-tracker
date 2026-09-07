@@ -62,6 +62,7 @@ export interface Moderator {
   full_name: string;
   email: string;
   role: StaffRole;
+  active: boolean;
 }
 
 /** A candidate row as listed in the Candidates table, with one outcome per step. */

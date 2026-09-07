@@ -26,7 +26,7 @@ src/
     candidate/     the self-report form (EmailGate -> StepForm -> StepRow)
     staff/         shared staff auth/login/nav (AuthContext, Login, RequireRole, TopNav, ResetPassword)
                    + CandidateForm (one candidate's report, used by both admin and moderator)
-    admin/         TestList, CreateTest, Candidates, Steps, Moderators, Report, ModeratorSelect
+    admin/         TestList, Users, CreateTest, Candidates, Steps, Moderators, Report, ModeratorSelect
     moderator/     DashboardHome, Dashboard, LiveMonitoring
   components/      shared UI: EvidenceList, IssuesSection, ui.tsx primitives (incl. Modal, PageHeader,
                    LoadingState, ErrorState, RefreshButton, FieldLabel), Logo
@@ -38,7 +38,12 @@ supabase/
                      0002_multi_evidence.sql (multi-file evidence array columns + RPC rebuild)
                      0003_staff_evidence_upload.sql (authenticated staff can upload evidence)
                      0004_candidate_evidence_read.sql (anon/candidates can read evidence back)
+                     0005_service_role_grants.sql (baseline table access for service-role Edge Functions)
+                     0006_candidate_edit_timestamps.sql (candidates can correct their own step/issue times)
+                     0007_user_active_status.sql (profiles.active, for deactivate/reactivate)
   functions/        create-moderator (Edge Function — invites a new admin or moderator)
+                     manage-users (Edge Function — admin: delete/deactivate/reactivate a user, change
+                     their login email, generate invite/reset links without sending email)
   seed_dev.sql      sample data for local development
 ```
 
@@ -56,7 +61,15 @@ npm run dev
 
 Pushing to `main` triggers `.github/workflows/deploy.yml`, which builds the app (using the `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` repo secrets) and publishes `dist/` to GitHub Pages. The Vite `base` and the router's `basename` are both set to `/load-testing-tracker/` for production builds (see `vite.config.ts` and `src/main.tsx`) — only for `dev` do they fall back to `/`.
 
-Database changes are **not** part of this pipeline — SQL migrations under `supabase/migrations/` and the `create-moderator` Edge Function are applied manually through the Supabase dashboard (SQL Editor / Edge Functions), since this project doesn't use the Supabase CLI for automated migration deploys.
+Database changes are **not** part of this pipeline. SQL migrations under `supabase/migrations/` and the Edge Functions under `supabase/functions/` can be applied either through the Supabase dashboard (SQL Editor / Edge Functions) or, once `npx supabase login` has been run once on a machine, via the CLI:
+
+```bash
+npx supabase link --project-ref <project-ref>
+npx supabase db push                              # applies pending migrations
+npx supabase functions deploy <function-name>      # e.g. manage-users, create-moderator
+```
+
+The migration history table only tracks migrations applied via the CLI — since earlier ones in this project were pasted into the SQL Editor by hand, a fresh clone may need `supabase migration repair --status applied <version...>` for the already-applied ones before `db push` will treat them as up to date.
 
 ## Feature history
 
@@ -116,3 +129,19 @@ Digging into "candidates can't see a preview of their evidence" surfaced two sep
 - Fixed a real bug this surfaced: outcome/comment/evidence edits were never synced back into the page's own session/candidate state after saving, only fetched once on page load — so the submit-time "missing evidence/comment" validation was silently checking stale data and would have let incomplete submissions through. Both the candidate and staff step-save handlers now keep that state in sync.
 - **Loading states now time out and show a real error with Retry** instead of an infinite spinner (`useAsyncLoad` hook, shared `LoadingState`/`ErrorState` components) — applied to every data-loading page. This was the direct fix for production getting stuck on "Loading…": the deployed frontend was running old code against a database that already had the newer migrations applied, so every request errored, and with no error handling that error just produced a silent, permanent spinner.
 - A refresh icon was added to the header of every page with a table, to re-fetch data on demand without a full reload.
+
+### Admin Users tab
+
+A new `/admin/users` page lists every admin/moderator account across the whole org (not scoped to one test), replacing the invite form that used to live on each test's Moderators tab (now a read-only workload table pointing here instead).
+
+- **List, edit, delete, invite** — backed by a new `manage-users` Edge Function for the operations that need the service role (delete, changing a user's login email) and the existing `create-moderator` function (now also parameterized by role) for invites.
+- **Resend password reset** and **invite**, each with two variants: the normal one sends an email via Supabase Auth (subject to its built-in per-project email rate limit), and a "generate link" alternative calls `auth.admin.generateLink` server-side and copies the raw link to the clipboard instead — sidesteps the rate limit entirely for an admin who wants to share a link directly (Slack, WhatsApp, etc).
+- A hardcoded `PROTECTED_EMAILS` list (currently just the org's original admin account) can never be deleted, checked both client-side (button disabled) and server-side in `manage-users` (the actual enforcement point) — a deliberate safeguard against ever locking the whole org out of the admin console.
+
+### Deactivate/reactivate users, bulk candidate upload, bulk moderator assignment, and rename to Crowd Test Tracker
+
+- **Deactivate/reactivate a user** from the Users tab — bans/unbans the Supabase Auth account (`auth.admin.updateUserById` with `ban_duration`) so they can't sign in, tracked in a new `profiles.active` column. Deliberately does **not** check or touch their existing candidate assignments the way delete does — those stay exactly as they were; reassigning is a separate, optional step. The protected account can't be deactivated either, for the same reason it can't be deleted; an admin can't deactivate their own account (server-enforced).
+- **Bulk-upload candidates from a spreadsheet** (`.xlsx`, `.xls`, or `.csv`) — one email per row in the first column; a header row is detected and skipped automatically since it doesn't parse as an email. Already-registered and malformed rows are counted and skipped with a clear preview before anything is written (`bulkAddCandidates` upserts with `ignoreDuplicates: true`, so re-uploading an overlapping list is safe). Parsing uses SheetJS's `xlsx` library, dynamically `import()`-ed only when the Bulk Upload modal is actually used (it's a large library, and this keeps it out of the main bundle for everyone who never touches the feature). Installed from `cdn.sheetjs.com` rather than the npm registry, since the npm-published build has long-unpatched high-severity CVEs (prototype pollution, ReDoS) that SheetJS's own maintainers only fix in their own CDN builds.
+- **Multi-select candidates and bulk-assign a moderator** — checkboxes on the Candidates table (with a select-all in the header) reveal an action bar for assigning all selected candidates to one moderator (or unassigning) in a single update. Deactivated moderators are deliberately excluded from this dropdown (they can't act on new work), unlike the existing per-candidate assignment picker, which is left showing everyone so an already-made assignment to a since-deactivated moderator still displays correctly.
+- **Renamed the displayed app name** from "Load Testing Tracker" to "Crowd Test Tracker" — cosmetic only (page title, README, every in-app wordmark). The GitHub Pages URL, `package.json` name, and the Edge Functions' hardcoded reset-password redirect URL were deliberately left as `load-testing-tracker` to avoid breaking existing links or already-sent invite/reset emails.
+- **Fixed a real bug found while building the above**: `supabase.functions.invoke()`'s `error.message` for a non-2xx Edge Function response is a generic "Edge Function returned a non-2xx status code" — the actual reason our own functions send back as JSON body was being silently discarded. A shared `invokeFunction` helper in `staffApi.ts` now reads it from `error.context` instead, so real errors (e.g. Supabase's email rate limit) show up in the UI instead of a meaningless generic message.

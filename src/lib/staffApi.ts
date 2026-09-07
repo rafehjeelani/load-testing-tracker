@@ -189,7 +189,10 @@ export async function reorderSteps(steps: { id: string; order_index: number }[])
  *  "a moderator" should offer admins as well. */
 export function listModerators(): Promise<Moderator[]> {
   return unwrap(
-    supabase.from("profiles").select("id, full_name, email, role").in("role", ["moderator", "admin"]),
+    supabase
+      .from("profiles")
+      .select("id, full_name, email, role, active")
+      .in("role", ["moderator", "admin"]),
   );
 }
 
@@ -228,7 +231,9 @@ export async function inviteStaff(email: string, fullName: string, role: StaffRo
 
 /** Every staff account (admin or moderator) in the org, alphabetical. */
 export function listAllUsers(): Promise<Moderator[]> {
-  return unwrap(supabase.from("profiles").select("id, full_name, email, role").order("full_name"));
+  return unwrap(
+    supabase.from("profiles").select("id, full_name, email, role, active").order("full_name"),
+  );
 }
 
 export async function updateUserFullName(userId: string, fullName: string) {
@@ -251,6 +256,13 @@ export async function updateUserEmailAdmin(userId: string, email: string) {
  *  clear message if they're still assigned as moderator on any candidate -- reassign those first. */
 export async function deleteUserAdmin(userId: string) {
   const data = await invokeFunction("manage-users", { action: "delete", user_id: userId });
+  if (data.error) throw new StaffApiError(data.error);
+}
+
+/** Admin-only: deactivates (or reactivates) a staff account via the manage-users edge function --
+ *  blocks sign-in without deleting the account or touching their candidate assignments. */
+export async function setUserActive(userId: string, active: boolean) {
+  const data = await invokeFunction("manage-users", { action: "set_active", user_id: userId, active });
   if (data.error) throw new StaffApiError(data.error);
 }
 
@@ -338,6 +350,20 @@ export async function addCandidate(testId: string, email: string) {
   if (error) throw new StaffApiError(error.message);
 }
 
+/** Bulk-adds candidates by email (e.g. parsed from an uploaded spreadsheet).
+ *  Emails already registered for this test are silently skipped rather than
+ *  failing the whole batch, since re-uploading a list that overlaps with
+ *  existing candidates is the expected common case. */
+export async function bulkAddCandidates(testId: string, emails: string[]) {
+  const { error } = await supabase
+    .from("candidates")
+    .upsert(
+      emails.map((email) => ({ test_id: testId, email })),
+      { onConflict: "test_id,email", ignoreDuplicates: true },
+    );
+  if (error) throw new StaffApiError(error.message);
+}
+
 export async function updateCandidateEmail(candidateId: string, email: string) {
   const { error } = await supabase.from("candidates").update({ email }).eq("id", candidateId);
   if (error) throw new StaffApiError(error.message);
@@ -354,6 +380,14 @@ export async function assignModerator(candidateId: string, moderatorId: string |
     .from("candidates")
     .update({ moderator_id: moderatorId })
     .eq("id", candidateId);
+  if (error) throw new StaffApiError(error.message);
+}
+
+export async function bulkAssignModerator(candidateIds: string[], moderatorId: string | null) {
+  const { error } = await supabase
+    .from("candidates")
+    .update({ moderator_id: moderatorId })
+    .in("id", candidateIds);
   if (error) throw new StaffApiError(error.message);
 }
 
