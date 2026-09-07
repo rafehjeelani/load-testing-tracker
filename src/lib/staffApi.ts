@@ -160,6 +160,20 @@ export async function deleteStep(stepId: string) {
 
 /** Bulk-updates order_index for a full reordered list of steps (e.g. after a drag-and-drop). */
 export async function reorderSteps(steps: { id: string; order_index: number }[]) {
+  // steps has a unique(test_id, order_index) constraint, so writing every
+  // step straight to its final order_index in parallel can collide with
+  // whatever another step still holds -- any real reorder (not just an
+  // append) needs two steps to swap values, and whichever update lands
+  // second finds its target index not yet vacated. Move everything to a
+  // disjoint negative range first, then to the real values, so no
+  // intermediate state can ever violate the constraint.
+  await Promise.all(
+    steps.map(({ id }, i) =>
+      supabase.from("steps").update({ order_index: -(i + 1) }).eq("id", id).then(({ error }) => {
+        if (error) throw new StaffApiError(error.message);
+      }),
+    ),
+  );
   await Promise.all(
     steps.map(({ id, order_index }) =>
       supabase.from("steps").update({ order_index }).eq("id", id).then(({ error }) => {

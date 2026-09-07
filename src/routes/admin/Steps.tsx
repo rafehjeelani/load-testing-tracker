@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useParams } from "react-router-dom";
-import { addStep, deleteStep, getTest, listSteps, reorderSteps, updateStep } from "../../lib/staffApi";
+import { addStep, deleteStep, getTest, listSteps, reorderSteps, StaffApiError, updateStep } from "../../lib/staffApi";
 import type { Step, Test } from "../../types";
 import { Button, ErrorState, LoadingState, PageHeader, RefreshButton } from "../../components/ui";
 import { TopNav } from "../staff/TopNav";
@@ -119,6 +119,7 @@ export default function Steps() {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [reorderError, setReorderError] = useState<string | null>(null);
 
   async function load() {
     if (!testId) return;
@@ -168,8 +169,17 @@ export default function Steps() {
     setSteps(next);
     setDragIndex(null);
     setOverIndex(null);
-    await reorderSteps(next.map((s, i) => ({ id: s.id, order_index: i + 1 })));
-    await load();
+    setReorderError(null);
+    try {
+      await reorderSteps(next.map((s, i) => ({ id: s.id, order_index: i + 1 })));
+    } catch (err) {
+      setReorderError(err instanceof StaffApiError ? err.message : "Couldn't save the new order. Reverted.");
+    } finally {
+      // Always resync with the database -- if the reorder failed partway,
+      // this reflects what's actually persisted instead of leaving the
+      // optimistic order on screen looking saved when it isn't.
+      await load();
+    }
   }
 
   if (status === "loading") return <LoadingState slow={slow} />;
@@ -197,6 +207,9 @@ export default function Steps() {
         </div>
       </PageHeader>
       <div className="max-w-[1240px] mx-auto px-8 pt-5 pb-7">
+        {reorderError && (
+          <div className="text-[12.5px] text-danger mb-3">{reorderError}</div>
+        )}
         <div className="bg-surface border border-border rounded-[10px] divide-y divide-border-soft mb-4">
           {steps.map((s, i) => (
             <StepRow
