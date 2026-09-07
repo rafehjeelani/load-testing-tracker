@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { Outcome } from "../../types";
 import { FieldLabel, Textarea } from "../../components/ui";
 import EvidenceList from "../../components/EvidenceList";
@@ -12,6 +12,10 @@ interface Props {
   initialComment: string;
   initialEvidencePaths: string[];
   initialSavedAt: string | null;
+  /** True right after a failed submit if this was the first incomplete
+   *  required step -- draws a temporary highlight so the candidate can find
+   *  it without hunting through the whole form. */
+  highlighted?: boolean;
   onSave: (outcome: Outcome | null, comment: string, evidencePaths: string[]) => Promise<{ saved_at: string | null } | void>;
   onUpload: (file: File) => Promise<string>;
   onViewEvidence: (path: string) => Promise<string>;
@@ -26,6 +30,7 @@ export default function StepRow({
   initialComment,
   initialEvidencePaths,
   initialSavedAt,
+  highlighted,
   onSave,
   onUpload,
   onViewEvidence,
@@ -38,11 +43,43 @@ export default function StepRow({
   const [editingTime, setEditingTime] = useState(false);
   const [editingTimeValue, setEditingTimeValue] = useState("");
   const commentRequired = outcome === "with_issues" || outcome === "unable";
+  const missingComment = commentRequired && !comment.trim();
+  const missingEvidence = outcome !== null && evidencePaths.length === 0;
+
+  // Several handlers below fire onSave in quick succession (e.g. blurring
+  // the comment box the same moment a radio gets unchecked) -- without this,
+  // two in-flight saves race and whichever's network response lands last
+  // wins, silently reverting whichever change was actually meant to be
+  // final. Chaining every save through this ref forces them to run and
+  // resolve strictly in the order they were triggered.
+  const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+  function enqueueSave<T>(fn: () => Promise<T>): Promise<T> {
+    const result = saveQueueRef.current.then(fn, fn);
+    saveQueueRef.current = result.catch(() => {});
+    return result;
+  }
 
   async function handleOutcomeChange(next: Outcome) {
     setOutcome(next);
-    const result = await onSave(next, comment, evidencePaths);
-    if (result?.saved_at) setSavedAt(result.saved_at);
+    const result = await enqueueSave(() => onSave(next, comment, evidencePaths));
+    if (result) setSavedAt(result.saved_at ?? null);
+  }
+
+  /** Re-clicking the already-selected radio un-selects it. Native radios
+   *  can't be unchecked by clicking themselves again, so this is wired
+   *  through onClick (which fires even without a checked-state change)
+   *  rather than onChange (which wouldn't fire at all here). */
+  async function handleUncheck() {
+    const hasOtherData = comment.trim().length > 0 || evidencePaths.length > 0;
+    const ok = window.confirm(
+      hasOtherData
+        ? "Clear your answer for this step? Your comment and evidence will be kept, along with the recorded time."
+        : "Clear your answer for this step? The recorded time will be cleared too, since nothing else is saved for this step.",
+    );
+    if (!ok) return;
+    setOutcome(null);
+    const result = await enqueueSave(() => onSave(null, comment, evidencePaths));
+    if (result) setSavedAt(result.saved_at ?? null);
   }
 
   function startEditTime() {
@@ -59,23 +96,27 @@ export default function StepRow({
 
   async function handleCommentBlur() {
     if (comment === initialComment) return;
-    await onSave(outcome, comment, evidencePaths);
+    await enqueueSave(() => onSave(outcome, comment, evidencePaths));
   }
 
   async function handleAddEvidence(path: string) {
     const next = [...evidencePaths, path];
     setEvidencePaths(next);
-    await onSave(outcome, comment, next);
+    await enqueueSave(() => onSave(outcome, comment, next));
   }
 
   async function handleRemoveEvidence(path: string) {
     const next = evidencePaths.filter((p) => p !== path);
     setEvidencePaths(next);
-    await onSave(outcome, comment, next);
+    await enqueueSave(() => onSave(outcome, comment, next));
   }
 
   return (
-    <div className="bg-surface border border-border rounded-[10px] p-5 mb-3">
+    <div
+      className={`bg-surface border rounded-[10px] p-5 mb-3 transition-shadow ${
+        highlighted ? "border-warning ring-2 ring-warning/40" : "border-border"
+      }`}
+    >
       <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
         <div className="font-semibold text-sm">
           {name}
@@ -136,12 +177,29 @@ export default function StepRow({
               type="radio"
               name={radioGroup}
               checked={outcome === key}
+              onClick={() => {
+                if (outcome === key) handleUncheck();
+              }}
               onChange={() => handleOutcomeChange(key)}
             />
             {OUTCOME_LABEL[key]}
           </label>
         ))}
       </div>
+
+      {(missingComment || missingEvidence) && (
+        <div className="flex items-center gap-1.5 text-[12px] text-warning mb-2.5">
+          <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="shrink-0">
+            <path d="M12 9v4M12 17h.01" />
+            <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+          </svg>
+          {missingComment && missingEvidence
+            ? "Add a comment and attach evidence to finish this step."
+            : missingComment
+              ? "Add a comment to finish this step."
+              : "Attach evidence to finish this step."}
+        </div>
+      )}
 
       <FieldLabel required={commentRequired}>Comment</FieldLabel>
       <Textarea

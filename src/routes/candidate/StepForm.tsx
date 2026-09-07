@@ -14,14 +14,17 @@ import { Badge, Button, PageHeader } from "../../components/ui";
 import { Logo } from "../../components/Logo";
 import StepRow from "./StepRow";
 import IssuesSection, { type IssuesSectionHandle } from "../../components/IssuesSection";
-import type { Outcome } from "../../types";
+import type { Outcome, Step } from "../../types";
 
 export default function StepForm() {
   const { testSlug } = useParams<{ testSlug: string }>();
   const { session, setSession } = useCandidateSession();
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [nudgeStepId, setNudgeStepId] = useState<string | null>(null);
+  const [skippedStepNames, setSkippedStepNames] = useState<string[]>([]);
   const issuesRef = useRef<IssuesSectionHandle>(null);
+  const stepRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   if (!session || session.testSlug !== testSlug) {
     // No live session for this test (fresh load, refresh, or a different
@@ -42,24 +45,40 @@ export default function StepForm() {
     // it stays frozen at whatever loaded on page-open, and the submit-time
     // validation below (missing evidence/comment) silently checks stale
     // data instead of what the candidate just entered.
+    //
+    // result.saved_at can legitimately be null (the RPC clears it when an
+    // outcome is unchecked with nothing else attached), so this only falls
+    // back to the previous value when result itself is absent -- `??` alone
+    // would treat that real null the same as "no result" and resurrect a
+    // stale timestamp.
     const existing = state.step_reports.find((r) => r.step_id === stepId);
+    const nextSavedAt = result ? result.saved_at ?? null : existing?.saved_at ?? null;
+    const updatedReports = [
+      ...state.step_reports.filter((r) => r.step_id !== stepId),
+      {
+        step_id: stepId,
+        outcome,
+        comment,
+        evidence_paths: evidencePaths,
+        saved_at: nextSavedAt,
+      },
+    ];
     setSession({
       testSlug: sessionTestSlug,
       email,
-      state: {
-        ...state,
-        step_reports: [
-          ...state.step_reports.filter((r) => r.step_id !== stepId),
-          {
-            step_id: stepId,
-            outcome,
-            comment,
-            evidence_paths: evidencePaths,
-            saved_at: result?.saved_at ?? existing?.saved_at ?? null,
-          },
-        ],
-      },
+      state: { ...state, step_reports: updatedReports },
     });
+
+    // Nudge about any earlier step that's still completely untouched --
+    // only for a genuine new outcome pick, not every comment/evidence edit
+    // (those call this too, with the outcome unchanged).
+    if (outcome !== null && existing?.outcome !== outcome) {
+      const stepIndex = sortedSteps.findIndex((s) => s.id === stepId);
+      const updatedByStep = new Map(updatedReports.map((r) => [r.step_id, r]));
+      const skipped = sortedSteps.slice(0, stepIndex).filter((s) => !updatedByStep.get(s.id)?.outcome);
+      setSkippedStepNames(skipped.map((s) => s.name));
+    }
+
     return result;
   }
 
@@ -122,22 +141,22 @@ export default function StepForm() {
     });
   }
 
+  function stepMissingEvidence(step: Step): boolean {
+    const r = reportByStep.get(step.id);
+    return !!(r?.outcome && r.evidence_paths.length === 0);
+  }
+
+  function stepMissingComment(step: Step): boolean {
+    const r = reportByStep.get(step.id);
+    return (r?.outcome === "with_issues" || r?.outcome === "unable") && !r.comment?.trim();
+  }
+
   function missingEvidenceSteps(): string[] {
-    return sortedSteps
-      .filter((s) => {
-        const r = reportByStep.get(s.id);
-        return r?.outcome && r.evidence_paths.length === 0;
-      })
-      .map((s) => s.name);
+    return sortedSteps.filter(stepMissingEvidence).map((s) => s.name);
   }
 
   function missingCommentSteps(): string[] {
-    return sortedSteps
-      .filter((s) => {
-        const r = reportByStep.get(s.id);
-        return (r?.outcome === "with_issues" || r?.outcome === "unable") && !r.comment?.trim();
-      })
-      .map((s) => s.name);
+    return sortedSteps.filter(stepMissingComment).map((s) => s.name);
   }
 
   async function handleSubmitForm() {
@@ -152,9 +171,16 @@ export default function StepForm() {
         parts.push(`add a comment explaining what happened for: ${missingComment.join(", ")}`);
       }
       setSubmitError(`Please ${parts.join("; and ")}.`);
+      const firstIncomplete = sortedSteps.find((s) => stepMissingEvidence(s) || stepMissingComment(s));
+      if (firstIncomplete) {
+        setNudgeStepId(firstIncomplete.id);
+        stepRefs.current[firstIncomplete.id]?.scrollIntoView({ behavior: "smooth", block: "center" });
+        setTimeout(() => setNudgeStepId((id) => (id === firstIncomplete.id ? null : id)), 2500);
+      }
       return;
     }
     setSubmitError(null);
+    setNudgeStepId(null);
     setSubmitting(true);
     try {
       await submitForm(sessionTestSlug, email);
@@ -216,25 +242,52 @@ export default function StepForm() {
           Evidence is required for every step.
         </p>
 
+        {skippedStepNames.length > 0 && (
+          <div className="flex items-start gap-2 bg-warning-soft border border-warning-border rounded-[10px] px-4 py-3 mb-4 text-[12.5px] text-warning">
+            <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="shrink-0 mt-0.5">
+              <path d="M12 9v4M12 17h.01" />
+              <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+            <span className="flex-1">
+              Looks like you skipped {skippedStepNames.length === 1 ? "a step" : "some steps"} — you can
+              still go back and report on: {skippedStepNames.join(", ")}.
+            </span>
+            <button
+              type="button"
+              onClick={() => setSkippedStepNames([])}
+              className="text-warning cursor-pointer text-[14px] leading-none shrink-0"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
         {sortedSteps.map((step) => {
           const report = reportByStep.get(step.id);
           return (
-            <StepRow
+            <div
               key={step.id}
-              name={step.name}
-              stepRequired={step.required}
-              radioGroup={`step-${step.id}`}
-              initialOutcome={report?.outcome ?? null}
-              initialComment={report?.comment ?? ""}
-              initialEvidencePaths={report?.evidence_paths ?? []}
-              initialSavedAt={report?.saved_at ?? null}
-              onSave={(outcome, comment, evidencePaths) =>
-                handleSaveStep(step.id, outcome, comment, evidencePaths)
-              }
-              onUpload={handleUpload}
-              onViewEvidence={handleViewEvidence}
-              onEditSavedAt={(savedAtIso) => handleEditSavedAt(step.id, savedAtIso)}
-            />
+              ref={(el) => {
+                stepRefs.current[step.id] = el;
+              }}
+            >
+              <StepRow
+                name={step.name}
+                stepRequired={step.required}
+                radioGroup={`step-${step.id}`}
+                initialOutcome={report?.outcome ?? null}
+                initialComment={report?.comment ?? ""}
+                initialEvidencePaths={report?.evidence_paths ?? []}
+                initialSavedAt={report?.saved_at ?? null}
+                highlighted={nudgeStepId === step.id}
+                onSave={(outcome, comment, evidencePaths) =>
+                  handleSaveStep(step.id, outcome, comment, evidencePaths)
+                }
+                onUpload={handleUpload}
+                onViewEvidence={handleViewEvidence}
+                onEditSavedAt={(savedAtIso) => handleEditSavedAt(step.id, savedAtIso)}
+              />
+            </div>
           );
         })}
 
