@@ -1,7 +1,15 @@
 import { useRef, useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
 import { useCandidateSession } from "./CandidateSessionContext";
-import { addIssue, getEvidenceViewUrl, submitForm, upsertStepReport, uploadEvidence } from "../../lib/candidateApi";
+import {
+  addIssue,
+  editIssueCreatedAt,
+  editStepSavedAt,
+  getEvidenceViewUrl,
+  submitForm,
+  upsertStepReport,
+  uploadEvidence,
+} from "../../lib/candidateApi";
 import { Badge, Button, PageHeader } from "../../components/ui";
 import { Logo } from "../../components/Logo";
 import StepRow from "./StepRow";
@@ -55,6 +63,18 @@ export default function StepForm() {
     return result;
   }
 
+  async function handleEditSavedAt(stepId: string, savedAtIso: string) {
+    await editStepSavedAt(sessionTestSlug, email, stepId, savedAtIso);
+    setSession({
+      testSlug: sessionTestSlug,
+      email,
+      state: {
+        ...state,
+        step_reports: state.step_reports.map((r) => (r.step_id === stepId ? { ...r, saved_at: savedAtIso } : r)),
+      },
+    });
+  }
+
   async function handleUpload(file: File) {
     return uploadEvidence(sessionTestSlug, email, file);
   }
@@ -86,6 +106,18 @@ export default function StepForm() {
             created_at: new Date().toISOString(),
           },
         ],
+      },
+    });
+  }
+
+  async function handleEditIssueTime(issueId: string, createdAtIso: string) {
+    await editIssueCreatedAt(sessionTestSlug, email, issueId, createdAtIso);
+    setSession({
+      testSlug: sessionTestSlug,
+      email,
+      state: {
+        ...state,
+        issues: state.issues.map((i) => (i.id === issueId ? { ...i, created_at: createdAtIso } : i)),
       },
     });
   }
@@ -201,6 +233,7 @@ export default function StepForm() {
               }
               onUpload={handleUpload}
               onViewEvidence={handleViewEvidence}
+              onEditSavedAt={(savedAtIso) => handleEditSavedAt(step.id, savedAtIso)}
             />
           );
         })}
@@ -215,6 +248,7 @@ export default function StepForm() {
             window.open(await handleViewEvidence(path), "_blank");
           }}
           getPreviewUrl={handleViewEvidence}
+          onEditTime={handleEditIssueTime}
         />
 
         <div className="text-[12px] text-text-3 text-center mt-2">

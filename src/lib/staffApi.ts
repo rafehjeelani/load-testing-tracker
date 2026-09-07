@@ -106,6 +106,14 @@ export async function updateTestName(testId: string, name: string) {
   if (error) throw new StaffApiError(error.message);
 }
 
+/** Admin-only: permanently deletes a test and everything under it (steps,
+ *  candidates, their step reports, and issues) via cascade. Evidence files
+ *  already uploaded to Storage are not removed. */
+export async function deleteTest(testId: string) {
+  const { error } = await supabase.from("tests").delete().eq("id", testId);
+  if (error) throw new StaffApiError(error.message);
+}
+
 // --- Steps ---
 
 export function listSteps(testId: string): Promise<Step[]> {
@@ -279,7 +287,7 @@ export async function listCandidates(testId: string): Promise<CandidateListItem[
     .from("candidates")
     .select("id, email, moderator_id, submitted, submitted_at")
     .eq("test_id", testId)
-    .order("email");
+    .order("created_at");
   if (candErr) throw new StaffApiError(candErr.message);
 
   const { data: reports, error: repErr } = await supabase

@@ -48,6 +48,8 @@ import { useAsyncLoad } from "../../lib/useAsyncLoad";
 export default function Users() {
   const [users, setUsers] = useState<Moderator[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [search, setSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState<"all" | StaffRole>("all");
 
   const [addOpen, setAddOpen] = useState(false);
   const [addRole, setAddRole] = useState<StaffRole>("moderator");
@@ -221,6 +223,13 @@ export default function Users() {
   if (status === "loading") return <LoadingState slow={slow} />;
   if (status === "error") return <ErrorState message={error!} onRetry={retry} />;
 
+  const filteredUsers = users.filter((user) => {
+    if (roleFilter !== "all" && user.role !== roleFilter) return false;
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return user.full_name.toLowerCase().includes(q) || user.email.toLowerCase().includes(q);
+  });
+
   return (
     <div className="min-h-screen bg-bg text-text">
       <TopNav
@@ -248,6 +257,23 @@ export default function Users() {
       </PageHeader>
 
       <div className="max-w-[1240px] mx-auto px-8 pt-5 pb-7">
+        <div className="flex items-center gap-2.5 mb-4.5 flex-wrap">
+          <input
+            className="w-full max-w-[340px] px-3 py-2.5 border border-border rounded-[7px] bg-surface text-[13.5px]"
+            placeholder="Search by name or email"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <select
+            value={roleFilter}
+            onChange={(e) => setRoleFilter(e.target.value as "all" | StaffRole)}
+            className="px-3 py-2.5 border border-border rounded-[7px] bg-surface text-[13.5px]"
+          >
+            <option value="all">All roles</option>
+            <option value="admin">Admin</option>
+            <option value="moderator">Moderator</option>
+          </select>
+        </div>
         <div className="bg-surface border border-border rounded-[10px] overflow-x-auto">
           <table className="w-full text-[13.5px]">
             <thead>
@@ -265,14 +291,14 @@ export default function Users() {
               </tr>
             </thead>
             <tbody>
-              {users.length === 0 && (
+              {filteredUsers.length === 0 && (
                 <tr>
                   <td colSpan={4} className="px-4 py-6 text-center text-text-3">
-                    No users yet — add one to get started.
+                    {users.length === 0 ? "No users yet — add one to get started." : "No users match your search."}
                   </td>
                 </tr>
               )}
-              {users.map((user) => {
+              {filteredUsers.map((user) => {
                 const editing = editingId === user.id;
                 return (
                   <tr key={user.id} className="border-b border-border-soft last:border-0 align-top">

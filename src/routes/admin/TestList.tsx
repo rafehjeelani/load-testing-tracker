@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { listTests } from "../../lib/staffApi";
+import { deleteTest, listTests, StaffApiError } from "../../lib/staffApi";
 import type { Test } from "../../types";
 import { Button, PageHeader, RefreshButton } from "../../components/ui";
 import { TopNav } from "../staff/TopNav";
@@ -11,6 +11,8 @@ export default function TestList() {
   const [tests, setTests] = useState<Test[] | null>(null);
   const [search, setSearch] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null);
 
   const { status, error, slow, retry } = useAsyncLoad(async () => {
     setTests(await listTests());
@@ -22,6 +24,24 @@ export default function TestList() {
       setTests(await listTests());
     } finally {
       setRefreshing(false);
+    }
+  }
+
+  async function handleDeleteTest(e: React.MouseEvent, t: Test) {
+    e.stopPropagation();
+    const ok = window.confirm(
+      `Permanently delete "${t.name}"? This removes all of its steps, candidates, and their submitted reports. This can't be undone.`,
+    );
+    if (!ok) return;
+    setDeletingId(t.id);
+    setRowError(null);
+    try {
+      await deleteTest(t.id);
+      setTests((prev) => (prev ?? []).filter((x) => x.id !== t.id));
+    } catch (err) {
+      setRowError({ id: t.id, message: err instanceof StaffApiError ? err.message : "Couldn't delete that test." });
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -81,12 +101,13 @@ export default function TestList() {
                 <th className="text-left px-4 py-2.5 text-[11.5px] font-semibold text-text-3 uppercase tracking-wide border-b border-border">
                   Created
                 </th>
+                <th className="px-4 py-2.5 border-b border-border w-[60px]" />
               </tr>
             </thead>
             <tbody>
               {status === "loading" && (
                 <tr>
-                  <td colSpan={2} className="px-4 py-6 text-center text-text-3">
+                  <td colSpan={3} className="px-4 py-6 text-center text-text-3">
                     Loading…
                     {slow && (
                       <div className="text-[12px] mt-1">
@@ -98,7 +119,7 @@ export default function TestList() {
               )}
               {status === "error" && (
                 <tr>
-                  <td colSpan={2} className="px-4 py-6 text-center">
+                  <td colSpan={3} className="px-4 py-6 text-center">
                     <div className="text-danger text-[13px] font-semibold mb-2">Couldn't load tests</div>
                     <div className="text-text-2 text-[12.5px] mb-3">{error}</div>
                     <Button onClick={retry}>Retry</Button>
@@ -107,8 +128,8 @@ export default function TestList() {
               )}
               {status === "ready" && tests !== null && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={2} className="px-4 py-6 text-center text-text-3">
-                    No tests yet — create one to get started.
+                  <td colSpan={3} className="px-4 py-6 text-center text-text-3">
+                    {tests.length === 0 ? "No tests yet — create one to get started." : "No tests match your search."}
                   </td>
                 </tr>
               )}
@@ -116,7 +137,7 @@ export default function TestList() {
                 <tr
                   key={t.id}
                   onClick={() => navigate(`/admin/tests/${t.id}/candidates`)}
-                  className="cursor-pointer hover:bg-surface-2 border-b border-border-soft last:border-0"
+                  className="cursor-pointer hover:bg-surface-2 border-b border-border-soft last:border-0 align-top"
                 >
                   <td className="px-4 py-2.5 font-semibold">{t.name}</td>
                   <td className="px-4 py-2.5 font-mono-tabular text-text-2">
@@ -125,6 +146,24 @@ export default function TestList() {
                       month: "short",
                       year: "numeric",
                     })}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <button
+                      type="button"
+                      onClick={(e) => handleDeleteTest(e, t)}
+                      disabled={deletingId === t.id}
+                      className="text-text-3 hover:text-danger cursor-pointer disabled:opacity-50"
+                      title="Delete test"
+                    >
+                      <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <path d="M3 6h18" />
+                        <path d="M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2m2 0v14a1 1 0 01-1 1H7a1 1 0 01-1-1V6" />
+                        <path d="M10 11v6M14 11v6" />
+                      </svg>
+                    </button>
+                    {rowError?.id === t.id && (
+                      <div className="text-[11.5px] text-danger mt-1 max-w-[200px]">{rowError.message}</div>
+                    )}
                   </td>
                 </tr>
               ))}

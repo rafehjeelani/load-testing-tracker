@@ -81,6 +81,7 @@ export default function Candidates() {
 
   const filtered = candidates.filter((c) => {
     if (search && !c.email.toLowerCase().includes(search.toLowerCase())) return false;
+    if (moderatorFilter === "unassigned") return c.moderator_id === null;
     if (moderatorFilter !== "all" && c.moderator_id !== moderatorFilter) return false;
     return true;
   });
@@ -297,7 +298,7 @@ export default function Candidates() {
             className="px-2.5 py-2 border border-border rounded-[6px] bg-surface-2 text-[13px]"
           >
             <option value="all">All moderators</option>
-            <option value="">Unassigned</option>
+            <option value="unassigned">Unassigned</option>
             {moderators.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.full_name}

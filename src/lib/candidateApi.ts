@@ -56,6 +56,27 @@ export function addIssue(
   });
 }
 
+/** Corrects the "Saved at" time on a step already reported -- candidates
+ *  often fill this in after the fact, so the real event time isn't "now". */
+export function editStepSavedAt(testSlug: string, email: string, stepId: string, savedAtIso: string) {
+  return callRpc<{ ok: true }>("rpc_edit_step_saved_at", {
+    p_test_slug: testSlug,
+    p_email: email,
+    p_step_id: stepId,
+    p_saved_at: savedAtIso,
+  });
+}
+
+/** Corrects the "Logged at" time on an issue/disconnection already logged. */
+export function editIssueCreatedAt(testSlug: string, email: string, issueId: string, createdAtIso: string) {
+  return callRpc<{ ok: true }>("rpc_edit_issue_created_at", {
+    p_test_slug: testSlug,
+    p_email: email,
+    p_issue_id: issueId,
+    p_created_at: createdAtIso,
+  });
+}
+
 export function submitForm(testSlug: string, email: string) {
   return callRpc<{ ok: true }>("rpc_submit_form", {
     p_test_slug: testSlug,
