@@ -28,6 +28,7 @@ export default function Report() {
   const [moderators, setModerators] = useState<Moderator[]>([]);
   const [issues, setIssues] = useState<(Issue & { candidate_email: string })[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [hiddenStepIds, setHiddenStepIds] = useState<Set<string>>(new Set());
 
   async function load() {
     if (!testId) return;
@@ -60,7 +61,7 @@ export default function Report() {
   if (status === "error") return <ErrorState message={error!} onRetry={retry} />;
   if (!test || !testId) return null;
 
-  const registered = candidates.length;
+  const invited = candidates.length;
   const startedForm = candidates.filter((c) => Object.values(c.step_outcomes).some((r) => r.outcome)).length;
   const completedAllSteps = candidates.filter((c) => steps.every((s) => c.step_outcomes[s.id]?.outcome)).length;
   const withIssues = candidates.filter((c) =>
@@ -70,8 +71,36 @@ export default function Report() {
     Object.values(c.step_outcomes).some((r) => r.outcome === "unable"),
   ).length;
 
+  const summaryStats = [
+    { label: "Invited", value: invited, color: "text-text", description: "Candidates added to this test." },
+    {
+      label: "Started Form",
+      value: startedForm,
+      color: "text-text",
+      description: "Candidates who have recorded an outcome for at least one step.",
+    },
+    {
+      label: "Completed All Steps",
+      value: completedAllSteps,
+      color: "text-success",
+      description: "Candidates who have recorded an outcome for every step in this test.",
+    },
+    {
+      label: "With Issues",
+      value: withIssues,
+      color: "text-warning",
+      description: "Candidates who reported “Completed with issues” on at least one step.",
+    },
+    {
+      label: "Unable to Complete",
+      value: unableToComplete,
+      color: "text-danger",
+      description: "Candidates who reported “Was not able to complete” on at least one step.",
+    },
+  ];
+
   const funnel = [
-    { name: "Registered", count: registered },
+    { name: "Invited", count: invited },
     ...steps.map((s) => ({
       name: s.name,
       count: candidates.filter((c) => c.step_outcomes[s.id]?.outcome).length,
@@ -100,6 +129,7 @@ export default function Report() {
     .map((c) => {
       const events: TimelineEvent[] = [];
       for (const s of steps) {
+        if (hiddenStepIds.has(s.id)) continue;
         const r = c.step_outcomes[s.id];
         if (r?.saved_at) {
           events.push({ time: new Date(r.saved_at).getTime(), kind: "step", label: s.name, outcome: r.outcome ?? undefined });
@@ -107,6 +137,7 @@ export default function Report() {
       }
       for (const iss of issues) {
         if (iss.candidate_email !== c.email) continue;
+        if (iss.step_id && hiddenStepIds.has(iss.step_id)) continue;
         const stepName = iss.custom_step_name ?? steps.find((s) => s.id === iss.step_id)?.name ?? "Issue";
         events.push({ time: new Date(iss.created_at).getTime(), kind: "issue", label: stepName });
       }
@@ -115,6 +146,7 @@ export default function Report() {
     })
     .filter((row) => row.events.length > 0)
     .sort((a, b) => a.email.localeCompare(b.email));
+  const allStepsHidden = steps.length > 0 && hiddenStepIds.size === steps.length;
 
   const allTimes = timelineRows.flatMap((r) => r.events.map((e) => e.time));
   const minTime = allTimes.length ? Math.min(...allTimes) : 0;
@@ -144,16 +176,20 @@ export default function Report() {
     }),
   }));
 
-  const modRows = moderators.map((m) => {
-    const mine = candidates.filter((c) => c.moderator_id === m.id);
-    return {
-      moderator: m,
-      assigned: mine.length,
-      completed: mine.filter((c) => c.submitted).length,
-      withIssues: mine.filter((c) => Object.values(c.step_outcomes).some((r) => r.outcome === "with_issues")).length,
-      blocked: mine.filter((c) => Object.values(c.step_outcomes).some((r) => r.outcome === "unable")).length,
-    };
-  });
+  const modRows = moderators
+    .map((m) => {
+      const mine = candidates.filter((c) => c.moderator_id === m.id);
+      return {
+        moderator: m,
+        assigned: mine.length,
+        completed: mine.filter((c) => c.submitted).length,
+        withIssues: mine.filter((c) => Object.values(c.step_outcomes).some((r) => r.outcome === "with_issues")).length,
+        blocked: mine.filter((c) => Object.values(c.step_outcomes).some((r) => r.outcome === "unable")).length,
+      };
+    })
+    // Most orgs have far more moderators than any single test needs -- only
+    // show the ones actually carrying candidates on this test.
+    .filter((r) => r.assigned > 0);
 
   return (
     <div className="min-h-screen bg-bg text-text">
@@ -174,16 +210,19 @@ export default function Report() {
       </PageHeader>
       <div className="max-w-[1240px] mx-auto px-8 pt-5 pb-7">
         <div className="grid grid-cols-5 gap-3 mb-8">
-          {[
-            ["Registered", registered, "text-text"],
-            ["Started Form", startedForm, "text-text"],
-            ["Completed All Steps", completedAllSteps, "text-success"],
-            ["With Issues", withIssues, "text-warning"],
-            ["Unable to Complete", unableToComplete, "text-danger"],
-          ].map(([label, value, color]) => (
-            <div key={label as string} className="bg-surface border border-border rounded-[10px] p-4">
-              <div className="text-[11.5px] font-semibold text-text-3 uppercase tracking-wide">{label}</div>
-              <div className={`font-mono-tabular text-2xl font-semibold mt-1.5 ${color}`}>{value}</div>
+          {summaryStats.map((s) => (
+            <div key={s.label} className="bg-surface border border-border rounded-[10px] p-4">
+              <div
+                title={s.description}
+                className="flex items-center gap-1 text-[11.5px] font-semibold text-text-3 uppercase tracking-wide cursor-help"
+              >
+                {s.label}
+                <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="shrink-0">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 16v-4M12 8h.01" />
+                </svg>
+              </div>
+              <div className={`font-mono-tabular text-2xl font-semibold mt-1.5 ${s.color}`}>{s.value}</div>
             </div>
           ))}
         </div>
@@ -229,8 +268,48 @@ export default function Report() {
         <div className="text-[12.5px] text-text-3 mb-3">
           Every step save and logged issue, plotted against real time per candidate.
         </div>
+        {steps.length > 0 && (
+          <div className="flex items-start gap-x-4 gap-y-2 flex-wrap mb-3 text-[12.5px]">
+            <span className="text-text-3 font-semibold shrink-0 pt-0.5">Steps:</span>
+            <div className="flex items-center gap-x-4 gap-y-2 flex-wrap flex-1">
+              {steps.map((s) => (
+                <label key={s.id} className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!hiddenStepIds.has(s.id)}
+                    onChange={() =>
+                      setHiddenStepIds((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(s.id)) next.delete(s.id);
+                        else next.add(s.id);
+                        return next;
+                      })
+                    }
+                  />
+                  {s.name}
+                </label>
+              ))}
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+              <button type="button" onClick={() => setHiddenStepIds(new Set())} className="text-accent cursor-pointer">
+                Select all
+              </button>
+              <button
+                type="button"
+                onClick={() => setHiddenStepIds(new Set(steps.map((s) => s.id)))}
+                className="text-text-3 hover:text-danger cursor-pointer"
+              >
+                Clear all
+              </button>
+            </div>
+          </div>
+        )}
         <div className="bg-surface border border-border rounded-[10px] p-5.5 mb-8">
-          {timelineRows.length === 0 ? (
+          {allStepsHidden ? (
+            <div className="text-[13px] text-text-3 text-center py-6">
+              All steps are hidden — check a step above to see its timeline.
+            </div>
+          ) : timelineRows.length === 0 ? (
             <div className="text-[13px] text-text-3 text-center py-6">No session activity yet.</div>
           ) : (
             <>
@@ -384,6 +463,13 @@ export default function Report() {
               </tr>
             </thead>
             <tbody>
+              {modRows.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-6 text-center text-text-3">
+                    No moderators have candidates assigned on this test yet.
+                  </td>
+                </tr>
+              )}
               {modRows.map((r) => (
                 <tr key={r.moderator.id} className="border-b border-border-soft last:border-0">
                   <td className="px-4 py-2.5 font-semibold">{r.moderator.full_name}</td>
