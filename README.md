@@ -47,6 +47,9 @@ supabase/
                      0010_two_outcomes.sql (outcome collapses from 3 values to 2: completed / unable)
                      0011_network_check_step.sql (steps.is_network_check, the fixed one-time gate)
                      0012_fix_issues_step_delete.sql (issues.step_id on delete cascade)
+                     0013_step_attempts.sql (candidates.current_attempt / step_reports.attempt --
+                     a disconnection starts a new attempt, so a re-answered step becomes a new
+                     row instead of overwriting the old one)
   functions/        create-moderator (Edge Function — invites a new admin or moderator)
                      manage-users (Edge Function — admin: delete/deactivate/reactivate a user, change
                      their login email, generate invite/reset links without sending email)
@@ -178,3 +181,10 @@ The candidate form was one long scrolling page listing every step at once; it's 
 - **"Add Issue / Disconnection" is relabeled "Disconnection"** at the top of both the wizard and Preview (same modal, still requires a comment and evidence). Logging one resets the candidate back to Step 1 — already-saved answers for every step are untouched, only where they're looking resets, matching "refreshing the assessment page and starting from the beginning."
 - **Report gets three new activity counters**: Forms Submitted, Steps Submitted (total step outcomes recorded across every candidate), and Disconnections Logged, plus a small proportional bar comparing steps vs disconnections.
 - **Fixed a real, pre-existing bug surfaced while testing this**: deleting a test with a candidate whose logged issue referenced a specific step failed outright (`issues_step_id_fkey` had no delete action, while `issues.candidate_id` already cascaded — Postgres could hit the step-side constraint before the candidate-side cascade removed the row). `0012_fix_issues_step_delete.sql` adds `on delete cascade` to match.
+
+### Wizard polish: inline step dropdown, preview-only disconnection log, and per-attempt resubmission
+
+- **The step dropdown now sits inline in the step's own heading** (`StepRow`'s `nameSlot` prop swaps in the `<select>` in place of the plain step name) instead of as a separate row above the card.
+- **The Issues & Disconnections list only renders in Preview**, not on every step of the wizard — the Disconnection button/modal (`IssuesSection`'s `hideList` prop) still works identically from both views.
+- **A disconnection now starts a genuinely new attempt** rather than just resetting where the candidate is looking. `0013_step_attempts.sql` adds `candidates.current_attempt` and `step_reports.attempt` (the unique constraint becomes `(candidate_id, step_id, attempt)`); every RPC that reads or writes `step_reports` now scopes to the candidate's current attempt, except the network check, which stays exempt so it's still never repeated. Re-answering a step after a disconnection writes a brand-new, separately-timestamped row instead of overwriting the old one — the candidate's own view (and every "current status" admin view: Candidates table, funnel, step stats) only ever shows the current attempt, so the old answer isn't shown as if it still stood, but nothing is deleted. The Report's Session Timeline is the one place that shows every attempt, via a new `listStepReportHistoryForTest`, so a step answered twice across a disconnection now plots as two separate dots.
+- **The "Was not able to complete" outcome label was renamed to "Completed with issues"** (`OUTCOME_LABEL.unable`) — the underlying `unable` value and its logic (comment required, excluded from the funnel) are unchanged, only the wording shown to candidates and in the Report tooltip.

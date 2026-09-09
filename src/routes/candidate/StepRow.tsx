@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import type { Outcome } from "../../types";
 import { FieldLabel, Textarea } from "../../components/ui";
 import EvidenceList from "../../components/EvidenceList";
@@ -16,6 +16,10 @@ interface Props {
    *  required step -- draws a temporary highlight so the candidate can find
    *  it without hunting through the whole form. */
   highlighted?: boolean;
+  /** When provided, replaces the plain step-name text in the heading (e.g.
+   *  the wizard's step-picker dropdown) -- the required asterisk still
+   *  renders alongside it either way. */
+  nameSlot?: ReactNode;
   onSave: (outcome: Outcome | null, comment: string, evidencePaths: string[]) => Promise<{ saved_at: string | null } | void>;
   onUpload: (file: File) => Promise<string>;
   onViewEvidence: (path: string) => Promise<string>;
@@ -31,6 +35,7 @@ export default function StepRow({
   initialEvidencePaths,
   initialSavedAt,
   highlighted,
+  nameSlot,
   onSave,
   onUpload,
   onViewEvidence,
@@ -118,11 +123,10 @@ export default function StepRow({
       }`}
     >
       <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
-        <div className="font-semibold text-sm">
-          {name}
+        <div className="font-semibold text-sm flex items-center gap-1">
+          {nameSlot ?? name}
           {stepRequired && (
             <span className="text-danger" title="Required">
-              {" "}
               *
             </span>
           )}

@@ -20,6 +20,19 @@ export interface StepReport {
   comment: string | null;
   evidence_paths: string[];
   saved_at: string | null;
+  attempt: number;
+}
+
+/** One historical step submission across any candidate in a test, spanning
+ *  every attempt (not just each candidate's current one) -- used only for
+ *  the Report page's Session Timeline, which is about chronological
+ *  activity rather than current status. */
+export interface StepReportHistoryRow {
+  candidate_email: string;
+  step_id: string;
+  outcome: Outcome | null;
+  saved_at: string | null;
+  attempt: number;
 }
 
 export interface Issue {
@@ -38,6 +51,7 @@ export interface CandidateState {
     email: string;
     submitted: boolean;
     submitted_at: string | null;
+    current_attempt: number;
   };
   steps: Step[];
   step_reports: StepReport[];
@@ -96,6 +110,7 @@ export interface CandidateFull {
     moderator_id: string | null;
     submitted: boolean;
     submitted_at: string | null;
+    current_attempt: number;
   };
   step_reports: StepReport[];
   issues: Issue[];

@@ -27,6 +27,10 @@ interface Props {
   getPreviewUrl?: (evidencePath: string) => Promise<string>;
   /** When provided, staff can correct the "Logged at" time on an existing entry. */
   onEditTime?: (issueId: string, newIso: string) => Promise<void>;
+  /** Hides the list of already-logged issues, keeping only the modal (still
+   *  triggerable via the ref) -- used by the candidate wizard, which shows
+   *  the list in Preview only instead of on every step. */
+  hideList?: boolean;
 }
 
 export interface IssuesSectionHandle {
@@ -35,7 +39,7 @@ export interface IssuesSectionHandle {
 }
 
 const IssuesSection = forwardRef<IssuesSectionHandle, Props>(function IssuesSection(
-  { steps, issues, onAdd, onUpload, onDownload, getPreviewUrl, onEditTime },
+  { steps, issues, onAdd, onUpload, onDownload, getPreviewUrl, onEditTime, hideList },
   ref,
 ) {
   const [formOpen, setFormOpen] = useState(false);
@@ -124,7 +128,9 @@ const IssuesSection = forwardRef<IssuesSectionHandle, Props>(function IssuesSect
   }
 
   return (
-    <div className="mt-7 mb-2">
+    <div className={hideList ? "" : "mt-7 mb-2"}>
+      {!hideList && (
+        <>
       <div className="font-bold text-[15px] mb-1">Issues &amp; Disconnections</div>
       <div className="text-[12.5px] text-text-3 mb-3.5">
         Log anything that went wrong — a comment and at least one piece of evidence are required.
@@ -225,6 +231,8 @@ const IssuesSection = forwardRef<IssuesSectionHandle, Props>(function IssuesSect
           </div>
         </div>
       ))}
+        </>
+      )}
 
       <Modal open={formOpen} onClose={closeForm} title="Report an Issue">
         <div className="flex flex-col gap-3">

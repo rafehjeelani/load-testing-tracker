@@ -1,7 +1,14 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
-import { getTest, listCandidates, listIssuesForTest, listModerators, listSteps } from "../../lib/staffApi";
-import type { CandidateListItem, Issue, Moderator, Step, Test } from "../../types";
+import {
+  getTest,
+  listCandidates,
+  listIssuesForTest,
+  listModerators,
+  listStepReportHistoryForTest,
+  listSteps,
+} from "../../lib/staffApi";
+import type { CandidateListItem, Issue, Moderator, Step, StepReportHistoryRow, Test } from "../../types";
 import { formatTime } from "../../lib/outcome";
 import { ErrorState, LoadingState, PageHeader, RefreshButton } from "../../components/ui";
 import { TopNav } from "../staff/TopNav";
@@ -26,23 +33,26 @@ export default function Report() {
   const [candidates, setCandidates] = useState<CandidateListItem[]>([]);
   const [moderators, setModerators] = useState<Moderator[]>([]);
   const [issues, setIssues] = useState<(Issue & { candidate_email: string })[]>([]);
+  const [history, setHistory] = useState<StepReportHistoryRow[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [hiddenStepIds, setHiddenStepIds] = useState<Set<string>>(new Set());
 
   async function load() {
     if (!testId) return;
-    const [t, s, c, m, iss] = await Promise.all([
+    const [t, s, c, m, iss, hist] = await Promise.all([
       getTest(testId),
       listSteps(testId),
       listCandidates(testId),
       listModerators(),
       listIssuesForTest(testId),
+      listStepReportHistoryForTest(testId),
     ]);
     setTest(t);
     setSteps([...s].sort((a, b) => a.order_index - b.order_index));
     setCandidates(c);
     setModerators(m);
     setIssues(iss);
+    setHistory(hist);
   }
 
   const { status, error, slow, retry } = useAsyncLoad(load, [testId]);
@@ -91,7 +101,7 @@ export default function Report() {
       label: "Unable to Complete",
       value: unableToComplete,
       color: "text-danger",
-      description: "Candidates who reported “Was not able to complete” on at least one step.",
+      description: "Candidates who reported “Completed with issues” on at least one step.",
     },
   ];
 
@@ -126,25 +136,29 @@ export default function Report() {
     return { step: s, attempted, successful, unable, unableRate };
   });
 
-  const timelineRows = candidates
-    .map((c) => {
-      const events: TimelineEvent[] = [];
-      for (const s of steps) {
-        if (hiddenStepIds.has(s.id)) continue;
-        const r = c.step_outcomes[s.id];
-        if (r?.saved_at) {
-          events.push({ time: new Date(r.saved_at).getTime(), kind: "step", label: s.name, outcome: r.outcome ?? undefined });
-        }
-      }
-      for (const iss of issues) {
-        if (iss.candidate_email !== c.email) continue;
-        if (iss.step_id && hiddenStepIds.has(iss.step_id)) continue;
-        const stepName = iss.custom_step_name ?? steps.find((s) => s.id === iss.step_id)?.name ?? "Issue";
-        events.push({ time: new Date(iss.created_at).getTime(), kind: "issue", label: stepName });
-      }
-      events.sort((a, b) => a.time - b.time);
-      return { email: c.email, events };
-    })
+  // Built from the full step_reports history (every attempt, not just each
+  // candidate's current one) so a disconnection's new attempt shows up as a
+  // second dot for that step instead of overwriting the first -- that's the
+  // whole point of the timeline.
+  const eventsByEmail = new Map<string, TimelineEvent[]>();
+  for (const r of history) {
+    if (!r.saved_at) continue;
+    if (hiddenStepIds.has(r.step_id)) continue;
+    const stepName = steps.find((s) => s.id === r.step_id)?.name;
+    if (!stepName) continue;
+    const events = eventsByEmail.get(r.candidate_email) ?? [];
+    events.push({ time: new Date(r.saved_at).getTime(), kind: "step", label: stepName, outcome: r.outcome ?? undefined });
+    eventsByEmail.set(r.candidate_email, events);
+  }
+  for (const iss of issues) {
+    if (iss.step_id && hiddenStepIds.has(iss.step_id)) continue;
+    const stepName = iss.custom_step_name ?? steps.find((s) => s.id === iss.step_id)?.name ?? "Issue";
+    const events = eventsByEmail.get(iss.candidate_email) ?? [];
+    events.push({ time: new Date(iss.created_at).getTime(), kind: "issue", label: stepName });
+    eventsByEmail.set(iss.candidate_email, events);
+  }
+  const timelineRows = [...eventsByEmail.entries()]
+    .map(([email, events]) => ({ email, events: [...events].sort((a, b) => a.time - b.time) }))
     .filter((row) => row.events.length > 0)
     .sort((a, b) => a.email.localeCompare(b.email));
   const allStepsHidden = steps.length > 0 && hiddenStepIds.size === steps.length;

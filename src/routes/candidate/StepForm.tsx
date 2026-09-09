@@ -79,6 +79,7 @@ export default function StepForm() {
         comment,
         evidence_paths: evidencePaths,
         saved_at: nextSavedAt,
+        attempt: state.candidate.current_attempt,
       },
     ];
     setSession({
@@ -132,6 +133,14 @@ export default function StepForm() {
             created_at: new Date().toISOString(),
           },
         ],
+        // Logging a disconnection starts a fresh attempt server-side -- the
+        // old answers aren't deleted (they stay in the database, and feed
+        // the Report's Session Timeline), but this session should stop
+        // showing them: every step reappears as "not yet reported," and the
+        // next save for it becomes a new, separately-timestamped row. The
+        // network check's report is kept, since it's exempt from attempts.
+        step_reports: state.step_reports.filter((r) => r.step_id === networkCheckStep?.id),
+        candidate: { ...state.candidate, current_attempt: state.candidate.current_attempt + 1 },
       },
     });
     // A disconnection restarts the candidate at Step 1 -- their already-saved
@@ -324,25 +333,13 @@ export default function StepForm() {
               step.
             </p>
 
-            <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
-              <span className="font-mono-tabular text-[12px] text-text-3 shrink-0">
-                Step {currentStepIndex + 1} of {sortedSteps.length}
-              </span>
-              <select
-                value={currentStepIndex}
-                onChange={(e) => goToStep(Number(e.target.value))}
-                className="px-2.5 py-1.5 border border-border rounded-[6px] bg-surface text-[12.5px]"
-              >
-                {sortedSteps.map((s, i) => (
-                  <option key={s.id} value={i}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
             <StepRow
-              key={currentStep.id}
+              // The attempt is folded into the key alongside the step id so a
+              // disconnection forces a remount even when currentStepIndex was
+              // already 0 -- otherwise StepRow (whose state only reads its
+              // initial* props once, on mount) would keep showing the prior
+              // attempt's now-superseded answer instead of resetting to blank.
+              key={`${currentStep.id}-${state.candidate.current_attempt}`}
               name={currentStep.name}
               stepRequired={currentStep.required}
               radioGroup={`step-${currentStep.id}`}
@@ -351,6 +348,24 @@ export default function StepForm() {
               initialEvidencePaths={reportByStep.get(currentStep.id)?.evidence_paths ?? []}
               initialSavedAt={reportByStep.get(currentStep.id)?.saved_at ?? null}
               highlighted={nudgeStepId === currentStep.id}
+              nameSlot={
+                <span className="flex items-center gap-2 flex-wrap">
+                  <select
+                    value={currentStepIndex}
+                    onChange={(e) => goToStep(Number(e.target.value))}
+                    className="font-semibold text-sm bg-transparent border-none focus:outline-none cursor-pointer -ml-1"
+                  >
+                    {sortedSteps.map((s, i) => (
+                      <option key={s.id} value={i}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="font-mono-tabular text-[11px] font-normal text-text-3 shrink-0">
+                    Step {currentStepIndex + 1} of {sortedSteps.length}
+                  </span>
+                </span>
+              }
               onSave={(outcome, comment, evidencePaths) => handleSaveStep(currentStep.id, outcome, comment, evidencePaths)}
               onUpload={handleUpload}
               onViewEvidence={handleViewEvidence}
@@ -402,6 +417,7 @@ export default function StepForm() {
           }}
           getPreviewUrl={handleViewEvidence}
           onEditTime={handleEditIssueTime}
+          hideList={viewMode !== "preview"}
         />
 
         <div className="text-[12px] text-text-3 text-center mt-2">

@@ -54,7 +54,7 @@ export default function CandidateForm() {
     evidencePaths: string[],
     stampSavedAt: boolean,
   ) {
-    await upsertStepReportStaff(candidateId!, stepId, outcome, comment, evidencePaths, stampSavedAt);
+    await upsertStepReportStaff(candidateId!, stepId, full!.candidate.current_attempt, outcome, comment, evidencePaths, stampSavedAt);
     // Keep full.step_reports in sync with every save -- otherwise it stays
     // frozen at whatever loaded on page-open, and the submit-time
     // validation below (missing evidence/comment) silently checks stale
@@ -72,6 +72,7 @@ export default function CandidateForm() {
             comment,
             evidence_paths: evidencePaths,
             saved_at: stampSavedAt ? new Date().toISOString() : existing?.saved_at ?? null,
+            attempt: f.candidate.current_attempt,
           },
         ],
       };
@@ -79,7 +80,7 @@ export default function CandidateForm() {
   }
 
   async function handleEditSavedAt(stepId: string, savedAtIso: string) {
-    await updateStepReportSavedAt(candidateId!, stepId, savedAtIso);
+    await updateStepReportSavedAt(candidateId!, stepId, full!.candidate.current_attempt, savedAtIso);
     await load();
   }
 

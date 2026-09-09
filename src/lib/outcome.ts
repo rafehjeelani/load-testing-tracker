@@ -2,7 +2,7 @@ import type { Outcome } from "../types";
 
 export const OUTCOME_LABEL: Record<Outcome, string> = {
   completed: "Completed",
-  unable: "Was not able to complete",
+  unable: "Completed with issues",
 };
 
 export const OUTCOME_TEXT_COLOR: Record<Outcome, string> = {

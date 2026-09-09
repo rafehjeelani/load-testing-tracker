@@ -10,6 +10,7 @@ import type {
   StaffRole,
   Step,
   StepReport,
+  StepReportHistoryRow,
   Test,
 } from "../types";
 
@@ -327,19 +328,27 @@ export async function listTestsForCurrentModerator(): Promise<Test[]> {
 export async function listCandidates(testId: string): Promise<CandidateListItem[]> {
   const { data: candidates, error: candErr } = await supabase
     .from("candidates")
-    .select("id, email, moderator_id, submitted, submitted_at")
+    .select("id, email, moderator_id, submitted, submitted_at, current_attempt")
     .eq("test_id", testId)
     .order("created_at");
   if (candErr) throw new StaffApiError(candErr.message);
 
   const { data: reports, error: repErr } = await supabase
     .from("step_reports")
-    .select("candidate_id, step_id, outcome, saved_at, comment, evidence_paths, updated_at")
+    .select("candidate_id, step_id, outcome, saved_at, comment, evidence_paths, updated_at, attempt")
     .in("candidate_id", (candidates ?? []).map((c) => c.id));
   if (repErr) throw new StaffApiError(repErr.message);
 
+  const attemptByCandidate = new Map((candidates ?? []).map((c) => [c.id, c.current_attempt]));
+
   const byCandidate = new Map<string, CandidateListItem["step_outcomes"]>();
   for (const r of reports ?? []) {
+    // A step's history from before the candidate's current attempt is
+    // "current status" noise here -- only the latest generation counts
+    // toward what the Candidates table / funnel / step stats show. The full
+    // history (every attempt) is what the Report page's Session Timeline
+    // uses instead, via listStepReportHistoryForTest.
+    if (r.attempt !== attemptByCandidate.get(r.candidate_id)) continue;
     const existing = byCandidate.get(r.candidate_id) ?? {};
     existing[r.step_id] = {
       outcome: r.outcome,
@@ -359,6 +368,24 @@ export async function listCandidates(testId: string): Promise<CandidateListItem[
     submitted_at: c.submitted_at,
     step_outcomes: byCandidate.get(c.id) ?? {},
   }));
+}
+
+/** Every step submission across every candidate in a test, spanning every
+ *  attempt (not just each candidate's current one) -- used for the Report
+ *  page's Session Timeline, which is about chronological activity rather
+ *  than current status. */
+export async function listStepReportHistoryForTest(testId: string): Promise<StepReportHistoryRow[]> {
+  const { data, error } = await supabase
+    .from("step_reports")
+    .select("step_id, outcome, saved_at, attempt, candidates!inner(email, test_id)")
+    .eq("candidates.test_id", testId);
+  if (error) throw new StaffApiError(error.message);
+  return (data ?? []).map((row) => {
+    const { candidates, ...report } = row as unknown as StepReportHistoryRow & {
+      candidates: { email: string };
+    };
+    return { ...report, candidate_email: candidates.email };
+  });
 }
 
 export async function addCandidate(testId: string, email: string) {
@@ -427,15 +454,16 @@ export async function listIssuesForTest(
 export async function getCandidateFull(candidateId: string): Promise<CandidateFull> {
   const { data: candidate, error: cErr } = await supabase
     .from("candidates")
-    .select("id, test_id, email, moderator_id, submitted, submitted_at")
+    .select("id, test_id, email, moderator_id, submitted, submitted_at, current_attempt")
     .eq("id", candidateId)
     .single();
   if (cErr) throw new StaffApiError(cErr.message);
 
   const { data: step_reports, error: srErr } = await supabase
     .from("step_reports")
-    .select("step_id, outcome, comment, evidence_paths, saved_at")
-    .eq("candidate_id", candidateId);
+    .select("step_id, outcome, comment, evidence_paths, saved_at, attempt")
+    .eq("candidate_id", candidateId)
+    .eq("attempt", candidate.current_attempt);
   if (srErr) throw new StaffApiError(srErr.message);
 
   const { data: issues, error: iErr } = await supabase
@@ -455,6 +483,7 @@ export async function getCandidateFull(candidateId: string): Promise<CandidateFu
 export async function upsertStepReportStaff(
   candidateId: string,
   stepId: string,
+  attempt: number,
   outcome: Outcome | null,
   comment: string,
   evidencePaths: string[],
@@ -463,6 +492,7 @@ export async function upsertStepReportStaff(
   const payload: Record<string, unknown> = {
     candidate_id: candidateId,
     step_id: stepId,
+    attempt,
     outcome,
     comment,
     evidence_paths: evidencePaths,
@@ -472,18 +502,19 @@ export async function upsertStepReportStaff(
 
   const { error } = await supabase
     .from("step_reports")
-    .upsert(payload, { onConflict: "candidate_id,step_id" });
+    .upsert(payload, { onConflict: "candidate_id,step_id,attempt" });
   if (error) throw new StaffApiError(error.message);
 }
 
 /** Lets staff manually correct the "saved at" time shown for a step (e.g. to
  *  match when the candidate says it actually happened). */
-export async function updateStepReportSavedAt(candidateId: string, stepId: string, savedAtIso: string) {
+export async function updateStepReportSavedAt(candidateId: string, stepId: string, attempt: number, savedAtIso: string) {
   const { error } = await supabase
     .from("step_reports")
     .update({ saved_at: savedAtIso })
     .eq("candidate_id", candidateId)
-    .eq("step_id", stepId);
+    .eq("step_id", stepId)
+    .eq("attempt", attempt);
   if (error) throw new StaffApiError(error.message);
 }
 
