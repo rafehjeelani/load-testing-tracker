@@ -4,7 +4,6 @@ import { Badge, Button, FieldLabel, Modal, Textarea } from "./ui";
 import EvidenceList from "./EvidenceList";
 import { formatTime, toTimeInputValue, withTimeInputValue } from "../lib/outcome";
 
-const OTHER = "__other__";
 const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg"]);
 function isImagePath(path: string) {
   const ext = path.split(".").pop()?.toLowerCase();
@@ -43,8 +42,6 @@ const IssuesSection = forwardRef<IssuesSectionHandle, Props>(function IssuesSect
   ref,
 ) {
   const [formOpen, setFormOpen] = useState(false);
-  const [stepChoice, setStepChoice] = useState(steps[0]?.id ?? OTHER);
-  const [customStepName, setCustomStepName] = useState("");
   const [comment, setComment] = useState("");
   const [evidencePaths, setEvidencePaths] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -80,8 +77,6 @@ const IssuesSection = forwardRef<IssuesSectionHandle, Props>(function IssuesSect
   function resetForm() {
     setComment("");
     setEvidencePaths([]);
-    setCustomStepName("");
-    setStepChoice(steps[0]?.id ?? OTHER);
   }
 
   function closeForm() {
@@ -93,8 +88,7 @@ const IssuesSection = forwardRef<IssuesSectionHandle, Props>(function IssuesSect
     if (!canSubmit) return;
     setSubmitting(true);
     try {
-      const isOther = stepChoice === OTHER;
-      await onAdd(isOther ? null : stepChoice, isOther ? customStepName.trim() : null, comment.trim(), evidencePaths);
+      await onAdd(null, null, comment.trim(), evidencePaths);
       closeForm();
     } finally {
       setSubmitting(false);
@@ -122,8 +116,12 @@ const IssuesSection = forwardRef<IssuesSectionHandle, Props>(function IssuesSect
     setEditingTimeId(null);
   }
 
-  function stepName(stepId: string | null, custom: string | null) {
+  /** New issues no longer carry a step -- position in the Session Log
+   *  already shows which step it followed. This only resolves a name for
+   *  issues logged before that change, so older entries keep their label. */
+  function stepName(stepId: string | null, custom: string | null): string | null {
     if (custom) return custom;
+    if (!stepId) return null;
     return steps.find((s) => s.id === stepId)?.name ?? "Unknown step";
   }
 
@@ -142,12 +140,14 @@ const IssuesSection = forwardRef<IssuesSectionHandle, Props>(function IssuesSect
         </div>
       )}
 
-      {issues.map((issue) => (
+      {issues.map((issue) => {
+        const name = stepName(issue.step_id, issue.custom_step_name);
+        return (
         <div key={issue.id} className="bg-surface border border-border rounded-[10px] p-3.5 mb-2.5">
           <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
-            <Badge variant="warning">{stepName(issue.step_id, issue.custom_step_name)}</Badge>
+            {name ? <Badge variant="warning">{name}</Badge> : <span />}
             {editingTimeId === issue.id ? (
-              <span className="flex items-center gap-1.5">
+              <span className="flex items-center gap-1.5 ml-auto">
                 <input
                   type="time"
                   value={editingTimeValue}
@@ -173,7 +173,7 @@ const IssuesSection = forwardRef<IssuesSectionHandle, Props>(function IssuesSect
                 </button>
               </span>
             ) : (
-              <span className="flex items-center gap-1.5 font-mono-tabular text-[11.5px] text-text-3">
+              <span className="flex items-center gap-1.5 font-mono-tabular text-[11.5px] text-text-3 ml-auto">
                 Logged {formatTime(issue.created_at)}
                 {onEditTime && (
                   <button
@@ -230,39 +230,13 @@ const IssuesSection = forwardRef<IssuesSectionHandle, Props>(function IssuesSect
             ))}
           </div>
         </div>
-      ))}
+        );
+      })}
         </>
       )}
 
       <Modal open={formOpen} onClose={closeForm} title="Report an Issue">
         <div className="flex flex-col gap-3">
-          <div>
-            <FieldLabel required>Step</FieldLabel>
-            <select
-              className="w-full px-3 py-2.5 border border-border rounded-[7px] bg-surface text-text text-[13.5px]"
-              value={stepChoice}
-              onChange={(e) => setStepChoice(e.target.value)}
-            >
-              {steps.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-              <option value={OTHER}>Other</option>
-            </select>
-          </div>
-          {stepChoice === OTHER && (
-            <div>
-              <FieldLabel required>Custom step name</FieldLabel>
-              <input
-                required
-                className="w-full px-3 py-2.5 border border-border rounded-[7px] bg-surface text-text text-[13.5px]"
-                placeholder="e.g. Pre-Test Setup"
-                value={customStepName}
-                onChange={(e) => setCustomStepName(e.target.value)}
-              />
-            </div>
-          )}
           <div>
             <FieldLabel required>Comment</FieldLabel>
             <Textarea

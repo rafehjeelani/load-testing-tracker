@@ -16,9 +16,21 @@ import StepRow from "./StepRow";
 import StepPreview from "./StepPreview";
 import NetworkCheck from "./NetworkCheck";
 import IssuesSection, { type IssuesSectionHandle } from "../../components/IssuesSection";
-import type { Outcome, Step } from "../../types";
+import type { Outcome, Step, StepReportHistoryEntry } from "../../types";
 
 type ViewMode = "wizard" | "preview";
+
+/** Upserts one entry by (step_id, attempt) -- a step can be resaved several
+ *  times within the same attempt (edits, re-checking an outcome), and that's
+ *  still one entry in the Session Log, not a new one each time. */
+function upsertHistoryEntry(
+  history: StepReportHistoryEntry[],
+  entry: StepReportHistoryEntry,
+): StepReportHistoryEntry[] {
+  const idx = history.findIndex((r) => r.step_id === entry.step_id && r.attempt === entry.attempt);
+  if (idx === -1) return [...history, entry];
+  return history.map((r, i) => (i === idx ? entry : r));
+}
 
 export default function StepForm() {
   const { testSlug } = useParams<{ testSlug: string }>();
@@ -82,10 +94,23 @@ export default function StepForm() {
         attempt: state.candidate.current_attempt,
       },
     ];
+    // Keep the Session Log's history in sync too -- upserted by (step, attempt)
+    // since a step can be resaved several times within the same attempt (that's
+    // still one entry in the log), but the network check isn't part of the
+    // ordinary step sequence so it's excluded here just like everywhere else.
+    const updatedHistory =
+      networkCheckStep?.id === stepId
+        ? state.step_report_history
+        : upsertHistoryEntry(state.step_report_history, {
+            step_id: stepId,
+            outcome,
+            saved_at: nextSavedAt,
+            attempt: state.candidate.current_attempt,
+          });
     setSession({
       testSlug: sessionTestSlug,
       email,
-      state: { ...state, step_reports: updatedReports },
+      state: { ...state, step_reports: updatedReports, step_report_history: updatedHistory },
     });
     return result;
   }
@@ -98,6 +123,15 @@ export default function StepForm() {
       state: {
         ...state,
         step_reports: state.step_reports.map((r) => (r.step_id === stepId ? { ...r, saved_at: savedAtIso } : r)),
+        step_report_history:
+          networkCheckStep?.id === stepId
+            ? state.step_report_history
+            : upsertHistoryEntry(state.step_report_history, {
+                step_id: stepId,
+                outcome: state.step_reports.find((r) => r.step_id === stepId)?.outcome ?? null,
+                saved_at: savedAtIso,
+                attempt: state.candidate.current_attempt,
+              }),
       },
     });
   }
@@ -394,6 +428,8 @@ export default function StepForm() {
           <StepPreview
             steps={sortedSteps}
             reportByStep={reportByStep}
+            history={state.step_report_history}
+            issues={state.issues}
             onEditStep={goToStep}
             onDownloadEvidence={async (path) => {
               window.open(await handleViewEvidence(path), "_blank");

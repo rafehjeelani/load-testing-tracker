@@ -35,6 +35,18 @@ export interface StepReportHistoryRow {
   attempt: number;
 }
 
+/** One historical step submission for a single candidate, spanning every
+ *  attempt (not just their current one) -- used for the candidate-facing
+ *  Preview's "Session Log", the chronological counterpart to the Report
+ *  page's Session Timeline. Excludes the network check, which isn't part
+ *  of the ordinary step sequence. */
+export interface StepReportHistoryEntry {
+  step_id: string;
+  outcome: Outcome | null;
+  saved_at: string | null;
+  attempt: number;
+}
+
 export interface Issue {
   id: string;
   step_id: string | null;
@@ -55,6 +67,7 @@ export interface CandidateState {
   };
   steps: Step[];
   step_reports: StepReport[];
+  step_report_history: StepReportHistoryEntry[];
   issues: Issue[];
 }
 
