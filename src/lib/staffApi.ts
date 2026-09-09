@@ -10,6 +10,7 @@ import type {
   StaffRole,
   Step,
   StepReport,
+  StepReportHistoryEntry,
   StepReportHistoryRow,
   Test,
 } from "../types";
@@ -478,6 +479,19 @@ export async function getCandidateFull(candidateId: string): Promise<CandidateFu
     step_reports: ((step_reports ?? []) as StepReport[]).map((r) => ({ ...r, evidence_paths: r.evidence_paths ?? [] })),
     issues: (issues ?? []) as Issue[],
   };
+}
+
+/** Every step submission across every attempt for one candidate, for the
+ *  staff (admin/moderator) candidate-editing view's Session Log -- the same
+ *  history the candidate sees in their own Preview. */
+export async function getCandidateStepHistory(candidateId: string): Promise<StepReportHistoryEntry[]> {
+  const { data, error } = await supabase
+    .from("step_reports")
+    .select("step_id, outcome, saved_at, attempt")
+    .eq("candidate_id", candidateId)
+    .not("saved_at", "is", null);
+  if (error) throw new StaffApiError(error.message);
+  return (data ?? []) as StepReportHistoryEntry[];
 }
 
 export async function upsertStepReportStaff(

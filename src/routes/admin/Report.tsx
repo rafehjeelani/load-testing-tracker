@@ -70,18 +70,31 @@ export default function Report() {
   if (status === "error") return <ErrorState message={error!} onRetry={retry} />;
   if (!test || !testId) return null;
 
+  // Every actual step submission across every attempt (not just each
+  // candidate's current one, and not the network check, which isn't part
+  // of the ordinary step sequence) -- the source of truth for "how much
+  // reporting has actually happened," since a candidate's current-attempt
+  // step_outcomes goes blank again after every disconnection even though
+  // they clearly engaged with the form before that.
+  const stepHistory = history.filter((h) => h.saved_at && steps.some((s) => s.id === h.step_id));
+
   const invited = candidates.length;
-  const startedForm = candidates.filter((c) => Object.values(c.step_outcomes).some((r) => r.outcome)).length;
+  const startedForm = candidates.filter((c) => stepHistory.some((h) => h.candidate_email === c.email)).length;
   const completedAllSteps = candidates.filter((c) => steps.every((s) => c.step_outcomes[s.id]?.outcome)).length;
   const unableToComplete = candidates.filter((c) =>
     Object.values(c.step_outcomes).some((r) => r.outcome === "unable"),
   ).length;
   const formsSubmitted = candidates.filter((c) => c.submitted).length;
-  const stepsSubmitted = steps.reduce(
-    (sum, s) => sum + candidates.filter((c) => c.step_outcomes[s.id]?.outcome).length,
-    0,
-  );
+  const stepsSubmitted = stepHistory.length;
   const disconnectionsLogged = issues.length;
+
+  const candidateActivity = candidates
+    .map((c) => ({
+      email: c.email,
+      stepsFilled: stepHistory.filter((h) => h.candidate_email === c.email).length,
+      disconnections: issues.filter((i) => i.candidate_email === c.email).length,
+    }))
+    .sort((a, b) => a.email.localeCompare(b.email));
 
   const summaryStats = [
     { label: "Invited", value: invited, color: "text-text", description: "Candidates added to this test." },
@@ -89,7 +102,7 @@ export default function Report() {
       label: "Started Form",
       value: startedForm,
       color: "text-text",
-      description: "Candidates who have recorded an outcome for at least one step.",
+      description: "Candidates who have recorded an outcome for at least one step, in this or any earlier attempt.",
     },
     {
       label: "Completed All Steps",
@@ -247,7 +260,8 @@ export default function Report() {
             {
               label: "Steps Submitted",
               value: stepsSubmitted,
-              description: "Total step outcomes recorded across every candidate in this test.",
+              description:
+                "Total step submissions across every candidate and every attempt -- a step re-answered after a disconnection counts again.",
             },
             {
               label: "Disconnections Logged",
@@ -288,6 +302,52 @@ export default function Report() {
               <div className="text-[13px] text-text-3">No activity yet.</div>
             )}
           </div>
+        </div>
+
+        <div className="mb-1 font-bold text-[15px]">Candidate Activity</div>
+        <div className="text-[12.5px] text-text-3 mb-3">
+          Steps filled counts every submission across every attempt, so a candidate who disconnected and
+          re-answered steps will show more than the number of steps in this test.
+        </div>
+        <div className="bg-surface border border-border rounded-[10px] overflow-x-auto mb-8">
+          <table className="w-full text-[13.5px]">
+            <thead>
+              <tr className="bg-surface-2">
+                {["Candidate", "Steps Filled", "Disconnections"].map((h, i) => (
+                  <th
+                    key={h}
+                    className={`px-4 py-2.5 text-[11.5px] font-semibold text-text-3 uppercase tracking-wide border-b border-border ${
+                      i === 0 ? "text-left" : "text-center"
+                    }`}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {candidateActivity.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="px-4 py-6 text-center text-text-3">
+                    No candidates on this test yet.
+                  </td>
+                </tr>
+              )}
+              {candidateActivity.map((c) => (
+                <tr key={c.email} className="border-b border-border-soft last:border-0">
+                  <td className="px-4 py-2.5 font-semibold">{c.email}</td>
+                  <td className="px-4 py-2.5 text-center font-mono-tabular">{c.stepsFilled}</td>
+                  <td
+                    className={`px-4 py-2.5 text-center font-mono-tabular ${
+                      c.disconnections > 0 ? "text-danger font-semibold" : ""
+                    }`}
+                  >
+                    {c.disconnections}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
 
         <div className="mb-3 font-bold text-[15px]">Candidate Funnel</div>

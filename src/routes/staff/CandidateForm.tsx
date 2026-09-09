@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   addIssueStaff,
   getCandidateFull,
+  getCandidateStepHistory,
   getEvidenceDownloadUrl,
   listSteps,
   submitFormStaff,
@@ -11,13 +12,25 @@ import {
   upsertStepReportStaff,
   uploadEvidenceStaff,
 } from "../../lib/staffApi";
-import type { CandidateFull, Outcome, Step } from "../../types";
+import type { CandidateFull, Outcome, Step, StepReportHistoryEntry } from "../../types";
 import { Badge, Button, ErrorState, LoadingState, PageHeader } from "../../components/ui";
 import { Logo } from "../../components/Logo";
 import IssuesSection, { type IssuesSectionHandle } from "../../components/IssuesSection";
+import SessionLog from "../../components/SessionLog";
 import StaffStepRow from "./StaffStepRow";
 import { useAuth } from "./AuthContext";
 import { useAsyncLoad } from "../../lib/useAsyncLoad";
+
+/** Upserts one entry by (step_id, attempt) -- a step can be resaved several
+ *  times within the same attempt, and that's still one entry in the log. */
+function upsertHistoryEntry(
+  history: StepReportHistoryEntry[],
+  entry: StepReportHistoryEntry,
+): StepReportHistoryEntry[] {
+  const idx = history.findIndex((r) => r.step_id === entry.step_id && r.attempt === entry.attempt);
+  if (idx === -1) return [...history, entry];
+  return history.map((r, i) => (i === idx ? entry : r));
+}
 
 export default function CandidateForm() {
   const { candidateId } = useParams<{ candidateId: string }>();
@@ -26,6 +39,7 @@ export default function CandidateForm() {
   const homePath = profile ? `/${profile.role}` : "/";
   const [steps, setSteps] = useState<Step[] | null>(null);
   const [full, setFull] = useState<CandidateFull | null>(null);
+  const [history, setHistory] = useState<StepReportHistoryEntry[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const issuesRef = useRef<IssuesSectionHandle>(null);
@@ -33,9 +47,10 @@ export default function CandidateForm() {
   async function load() {
     if (!candidateId) return;
     const f = await getCandidateFull(candidateId);
-    const s = await listSteps(f.candidate.test_id);
+    const [s, h] = await Promise.all([listSteps(f.candidate.test_id), getCandidateStepHistory(candidateId)]);
     setFull(f);
     setSteps(s);
+    setHistory(h);
   }
 
   const { status, error, slow, retry } = useAsyncLoad(load, [candidateId]);
@@ -59,9 +74,10 @@ export default function CandidateForm() {
     // frozen at whatever loaded on page-open, and the submit-time
     // validation below (missing evidence/comment) silently checks stale
     // data instead of what was just entered.
+    const existing = full!.step_reports.find((r) => r.step_id === stepId);
+    const nextSavedAt = stampSavedAt ? new Date().toISOString() : existing?.saved_at ?? null;
     setFull((f) => {
       if (!f) return f;
-      const existing = f.step_reports.find((r) => r.step_id === stepId);
       return {
         ...f,
         step_reports: [
@@ -71,12 +87,21 @@ export default function CandidateForm() {
             outcome,
             comment,
             evidence_paths: evidencePaths,
-            saved_at: stampSavedAt ? new Date().toISOString() : existing?.saved_at ?? null,
+            saved_at: nextSavedAt,
             attempt: f.candidate.current_attempt,
           },
         ],
       };
     });
+    // Keep the Session Log in sync too, same as the candidate's own view.
+    setHistory((h) =>
+      upsertHistoryEntry(h, {
+        step_id: stepId,
+        outcome,
+        saved_at: nextSavedAt,
+        attempt: full!.candidate.current_attempt,
+      }),
+    );
   }
 
   async function handleEditSavedAt(stepId: string, savedAtIso: string) {
@@ -213,6 +238,8 @@ export default function CandidateForm() {
             />
           );
         })}
+
+        <SessionLog steps={sortedSteps} history={history} issues={full.issues} />
 
         <IssuesSection
           ref={issuesRef}

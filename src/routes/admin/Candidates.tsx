@@ -431,6 +431,11 @@ export default function Candidates() {
               </option>
             ))}
           </select>
+          <span className="text-[12.5px] text-text-3 font-mono-tabular whitespace-nowrap">
+            {search.trim() || moderatorFilter !== "all"
+              ? `${filtered.length} of ${candidates.length} candidate${candidates.length === 1 ? "" : "s"}`
+              : `${candidates.length} candidate${candidates.length === 1 ? "" : "s"}`}
+          </span>
           <div className="flex-1" />
           <Button variant="secondary" onClick={() => setBulkUploadOpen(true)} className="flex items-center gap-1.5">
             <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -508,7 +513,7 @@ export default function Candidates() {
           <table className="w-full text-[13.5px] min-w-[900px]">
             <thead>
               <tr className="bg-surface-2">
-                <th className="px-4 py-2.5 border-b border-border w-[36px]">
+                <th className="sticky left-0 z-10 bg-surface-2 px-4 py-2.5 border-b border-border w-[36px]">
                   <input
                     type="checkbox"
                     checked={filtered.length > 0 && filtered.every((c) => selectedIds.has(c.id))}
@@ -516,20 +521,28 @@ export default function Candidates() {
                     title="Select all"
                   />
                 </th>
-                <th className="text-left px-4 py-2.5 text-[11.5px] font-semibold text-text-3 uppercase tracking-wide border-b border-border">
+                <th className="sticky left-[36px] z-10 bg-surface-2 text-left px-4 py-2.5 text-[11.5px] font-semibold text-text-3 uppercase tracking-wide border-b border-r border-border">
                   Email
                 </th>
                 <th className="text-left px-4 py-2.5 text-[11.5px] font-semibold text-text-3 uppercase tracking-wide border-b border-border">
                   Moderator
                 </th>
-                {steps.map((s) => (
-                  <th
-                    key={s.id}
-                    className="text-right px-4 py-2.5 text-[11.5px] font-semibold text-text-3 uppercase tracking-wide border-b border-border whitespace-nowrap"
-                  >
-                    {s.name}
-                  </th>
-                ))}
+                {steps.map((s) => {
+                  // How many of the currently-displayed (filtered) candidates
+                  // have a timestamp for this step in their current attempt --
+                  // matches every other number in this table, which is all
+                  // current-status.
+                  const reportedCount = filtered.filter((c) => c.step_outcomes[s.id]?.outcome).length;
+                  return (
+                    <th
+                      key={s.id}
+                      className="w-[110px] text-right px-4 py-2.5 text-[11.5px] font-semibold text-text-3 uppercase tracking-wide border-b border-border leading-tight"
+                    >
+                      {s.name}
+                      <div className="font-mono-tabular normal-case font-normal text-text-2 mt-0.5">({reportedCount})</div>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
@@ -543,8 +556,8 @@ export default function Candidates() {
               {filtered.map((c) => {
                 const hasData = c.submitted || Object.values(c.step_outcomes).some((o) => o.outcome);
                 return (
-                <tr key={c.id} className="border-b border-border-soft last:border-0 hover:bg-surface-2">
-                  <td className="px-4 py-2.5">
+                <tr key={c.id} className="group border-b border-border-soft last:border-0 hover:bg-surface-2">
+                  <td className="sticky left-0 z-10 bg-surface group-hover:bg-surface-2 px-4 py-2.5">
                     <input
                       type="checkbox"
                       checked={selectedIds.has(c.id)}
@@ -552,7 +565,7 @@ export default function Candidates() {
                     />
                   </td>
                   {editingCandidateId === c.id ? (
-                    <td className="px-4 py-2">
+                    <td className="sticky left-[36px] z-10 bg-surface group-hover:bg-surface-2 border-r border-border px-4 py-2">
                       <div className="flex items-center gap-1.5">
                         <input
                           autoFocus
@@ -585,7 +598,7 @@ export default function Candidates() {
                       </div>
                     </td>
                   ) : (
-                    <td className="px-4 py-2.5">
+                    <td className="sticky left-[36px] z-10 bg-surface group-hover:bg-surface-2 border-r border-border px-4 py-2.5">
                       <div className="flex items-center gap-2">
                         <span
                           onClick={() => navigate(`/admin/tests/${testId}/candidates/${c.id}`)}
@@ -642,7 +655,7 @@ export default function Candidates() {
                       <td
                         key={s.id}
                         onClick={() => navigate(`/admin/tests/${testId}/candidates/${c.id}`)}
-                        className={`px-4 py-2.5 text-right font-mono-tabular cursor-pointer ${
+                        className={`w-[110px] px-4 py-2.5 text-right font-mono-tabular cursor-pointer ${
                           r?.outcome ? OUTCOME_TEXT_COLOR[r.outcome] : "text-text-3"
                         }`}
                       >

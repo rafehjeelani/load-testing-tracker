@@ -29,8 +29,10 @@ src/
                    + CandidateForm (one candidate's report, used by both admin and moderator)
     admin/         TestList, Users, CreateTest, Candidates, Steps, Moderators, Report, ModeratorSelect
     moderator/     DashboardHome, Dashboard, LiveMonitoring
-  components/      shared UI: EvidenceList, IssuesSection, ui.tsx primitives (incl. Modal, PageHeader,
-                   LoadingState, ErrorState, RefreshButton, FieldLabel), Logo
+  components/      shared UI: EvidenceList, IssuesSection, SessionLog (chronological step + disconnection
+                   history, used by both the candidate's Preview and staff's CandidateForm), ui.tsx
+                   primitives (incl. Modal, PageHeader, LoadingState, ErrorState, RefreshButton,
+                   FieldLabel), Logo
   lib/             candidateApi.ts, staffApi.ts (all Supabase calls), outcome.ts (formatting),
                    storagePath.ts (filename sanitizing), useAsyncLoad.ts (load/timeout/error hook),
                    csv.ts, supabase.ts (client)
@@ -193,3 +195,13 @@ The candidate form was one long scrolling page listing every step at once; it's 
 - **The "Was not able to complete" outcome label was renamed to "Completed with issues"** (`OUTCOME_LABEL.unable`) — the underlying `unable` value and its logic (comment required, excluded from the funnel) are unchanged, only the wording shown to candidates and in the Report tooltip.
 - **Preview gains a "Session Log"**: a chronological list of every step submission (across every attempt) and every disconnection, in the order they happened — so a step answered, then disconnected, then re-answered shows as "Step 1, Step 2, Disconnection logged, Step 1, Step 2" rather than only the latest state. `0014_session_log.sql` adds `step_report_history` to `rpc_get_candidate_state`'s payload (every attempt's step submissions, network check excluded); the per-step "current status" cards above it are unchanged, still current-attempt-only, still the surface for editing and Submit validation.
 - **Disconnection/Report an Issue no longer asks which step it was for** — the Session Log's ordering already shows that. Removed the required Step picker from `IssuesSection`'s shared modal (both the candidate's Disconnection and staff's own Report an Issue), and `0015_drop_issue_has_a_step.sql` drops the `issue_has_a_step` check constraint that required one. Already-logged issues that do have a step keep showing it; new ones just don't ask.
+
+### Report: candidate-level activity, and fixing a metric the attempt model broke
+
+- **New "Candidate Activity" table** (Email / Steps Filled / Disconnections), between the Activity summary and the Candidate Funnel — Steps Filled counts every step submission across every attempt for that candidate, so someone who disconnected and re-answered steps shows more than the test's step count, not less.
+- **Candidates table (`src/routes/admin/Candidates.tsx`)**: the Email column (and its row-select checkbox) is now frozen (`position: sticky`) while the many per-step columns scroll horizontally underneath, so you can always tell whose row you're looking at; every step column now shares a standard width (`w-[110px]`, header text wraps instead of forcing the column wide) instead of sizing to each step's name length; a candidate count (`N candidates`, or `M of N candidates` once the search box or moderator filter narrows the list) sits next to the filter controls; and each step column's header now shows, in parentheses, how many of the currently-displayed (filtered) candidates have a timestamp for that step in their current attempt.
+- **Fixed "Steps Submitted" and "Started Form"**, both of which had gone quietly wrong once attempts existed: they read `step_outcomes`, which is scoped to each candidate's *current* attempt, so a candidate who'd filled in several steps then disconnected would show as having submitted fewer steps than they actually had (their current attempt resets to blank) -- "Started Form" could even flip back to "not started." Both now derive from the full `step_report_history` (every attempt) instead, matching the new Candidate Activity table and the Session Timeline, which already used history correctly. "Completed All Steps" and "Unable to Complete" are left as current-attempt snapshots on purpose -- those are meant to answer "where do things stand right now," not "what happened historically."
+
+### Staff candidate view gets the same Session Log as the candidate's own Preview
+
+The candidate-side Session Log (chronological step submissions across every attempt, plus disconnections) only existed in the candidate's own Preview -- staff (admin/moderator) editing the same candidate saw just the current-attempt step cards, with no way to see the history behind them. Extracted the Session Log into a shared `src/components/SessionLog.tsx` and added it to `src/routes/staff/CandidateForm.tsx` (via a new `getCandidateStepHistory` in `staffApi.ts`, fetching every attempt's step_reports for that one candidate), positioned the same way: after the step cards, before Issues & Disconnections. It updates optimistically on every staff edit, same as the candidate's own view.
