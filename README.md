@@ -55,6 +55,12 @@ supabase/
                      0014_session_log.sql (rpc_get_candidate_state also returns step_report_history,
                      every attempt's step submissions, for the candidate-facing Session Log)
                      0015_drop_issue_has_a_step.sql (issues no longer require a step_id/custom_step_name)
+                     0016_session_log_evidence.sql (adds comment/evidence_paths to step_report_history,
+                     for the Session Log's per-entry expand)
+                     0018_revert_carry_forward.sql (a same-day carry-forward experiment -- disconnection
+                     wouldn't reset a step's current view -- was tried, rejected, and reverted; this
+                     restores rpc_get_candidate_state/rpc_edit_step_saved_at to their 0016 behavior.
+                     0017 was the reverted migration itself, removed from the repo by the revert)
   functions/        create-moderator (Edge Function — invites a new admin or moderator)
                      manage-users (Edge Function — admin: delete/deactivate/reactivate a user, change
                      their login email, generate invite/reset links without sending email)
@@ -207,3 +213,9 @@ The candidate form was one long scrolling page listing every step at once; it's 
 ### Staff candidate view gets the same Session Log as the candidate's own Preview
 
 The candidate-side Session Log (chronological step submissions across every attempt, plus disconnections) only existed in the candidate's own Preview -- staff (admin/moderator) editing the same candidate saw just the current-attempt step cards, with no way to see the history behind them. Extracted the Session Log into a shared `src/components/SessionLog.tsx` and added it to `src/routes/staff/CandidateForm.tsx` (via a new `getCandidateStepHistory` in `staffApi.ts`, fetching every attempt's step_reports for that one candidate), positioned the same way: after the step cards, before Issues & Disconnections. It updates optimistically on every staff edit, same as the candidate's own view.
+
+### Disconnection: blank form + an explicit Skip, not carry-forward
+
+A same-day experiment made a disconnection leave every step showing its last real answer instead of resetting to blank (0017, since reverted -- see the migrations list above). That wasn't the right shape: on the real assessment platform a disconnection genuinely can require the candidate to answer again, and pre-filling old data made it too easy to click past a step that actually needed a fresh look. What was needed instead: the disconnected candidate lands back on Step 1 with every step's form blank, same as always, dropdown navigation unchanged -- but where a step already has an answer from *before* this disconnection, a **Skip** button now sits next to Next, since on the real platform some steps (consent, onboarding, etc.) don't repeat on every reconnect and there's no fixed list of which ones. Skip advances like Next but writes nothing -- the step's last real answer (from the earlier attempt) stands untouched, right where the Session Log and Report Session Timeline already show it; picking an outcome instead of skipping still creates a genuinely new, separately-timestamped row, exactly as before. A step with no prior answer at all still has no Skip option -- Next stays mandatory-outcome-gated for those, unchanged. All of this reads from `state.step_report_history` (already fetched for the Session Log), so no schema or RPC change was needed for it.
+
+Re-applied the Network Check evidence-only simplification alongside this (it was bundled in the same reverted commit, but wasn't itself the problem): no outcome radios or comment field, just one required evidence upload.

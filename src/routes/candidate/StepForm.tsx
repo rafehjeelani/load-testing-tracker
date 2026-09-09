@@ -286,7 +286,6 @@ export default function StepForm() {
         onSave={(outcome, comment, evidencePaths) => handleSaveStep(networkCheckStep.id, outcome, comment, evidencePaths)}
         onUpload={handleUpload}
         onViewEvidence={handleViewEvidence}
-        onEditSavedAt={(savedAtIso) => handleEditSavedAt(networkCheckStep.id, savedAtIso)}
         onContinue={() => setPastNetworkCheck(true)}
       />
     );
@@ -295,6 +294,12 @@ export default function StepForm() {
   const currentStep = sortedSteps[currentStepIndex];
   const isLastStep = currentStepIndex === sortedSteps.length - 1;
   const currentOutcome = currentStep ? reportByStep.get(currentStep.id)?.outcome : null;
+  // True when this step was already reported in an earlier attempt (before
+  // a disconnection) -- lets the candidate Skip past it this attempt
+  // instead of being forced to redo it, for a step that wasn't actually
+  // part of what they had to redo after reconnecting. A step with no prior
+  // answer at all still requires picking an outcome before Next unlocks.
+  const currentStepHasPriorAnswer = !!currentStep && state.step_report_history.some((h) => h.step_id === currentStep.id);
 
   return (
     <div className="min-h-screen bg-bg text-text">
@@ -423,9 +428,21 @@ export default function StepForm() {
               >
                 {isLastStep ? "Review & Submit" : "Next"}
               </Button>
+              {!currentOutcome && currentStepHasPriorAnswer && (
+                <Button
+                  variant="ghost"
+                  onClick={() => (isLastStep ? setViewMode("preview") : goToStep(currentStepIndex + 1))}
+                >
+                  Skip
+                </Button>
+              )}
             </div>
             {!currentOutcome && (
-              <div className="text-[12px] text-text-3 mt-1.5">Pick an outcome above to continue.</div>
+              <div className="text-[12px] text-text-3 mt-1.5">
+                {currentStepHasPriorAnswer
+                  ? "Already reported before this disconnection — pick an outcome to report on it again, or Skip to leave it as it was."
+                  : "Pick an outcome above to continue."}
+              </div>
             )}
           </>
         ) : (
