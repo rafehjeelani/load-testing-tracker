@@ -103,7 +103,13 @@ export default function Report() {
     { name: "Invited", count: invited },
     ...steps.map((s) => ({
       name: s.name,
-      count: candidates.filter((c) => c.step_outcomes[s.id]?.outcome).length,
+      // Excludes "unable" -- a candidate who was unable to complete a step
+      // didn't actually make it through, so they shouldn't count as having
+      // reached this stage of the funnel.
+      count: candidates.filter((c) => {
+        const outcome = c.step_outcomes[s.id]?.outcome;
+        return outcome && outcome !== "unable";
+      }).length,
     })),
   ];
   const maxFunnel = funnel[0]?.count || 1;
