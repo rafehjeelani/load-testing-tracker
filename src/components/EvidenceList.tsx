@@ -21,8 +21,6 @@ interface Props {
   onDownload?: (path: string) => Promise<void>;
   /** When provided, image files get a thumbnail preview fetched via this (e.g. a signed URL). Not needed for files just uploaded this session -- those preview instantly from the local file. */
   getPreviewUrl?: (path: string) => Promise<string>;
-  /** Caps how many files can be attached. Defaults to the app-wide MAX_EVIDENCE_FILES; pass 1 for a single-file upload (e.g. the network check). */
-  maxFiles?: number;
 }
 
 export default function EvidenceList({
@@ -33,7 +31,6 @@ export default function EvidenceList({
   required,
   onDownload,
   getPreviewUrl,
-  maxFiles = MAX_EVIDENCE_FILES,
 }: Props) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -102,7 +99,7 @@ export default function EvidenceList({
     }
   }
 
-  const atLimit = paths.length >= maxFiles;
+  const atLimit = paths.length >= MAX_EVIDENCE_FILES;
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -187,7 +184,7 @@ export default function EvidenceList({
               {required ? <span className="text-danger">(required)</span> : <span className="text-text-3">(optional)</span>}
             </>
           ) : (
-            `Attach another (${paths.length}/${maxFiles})`
+            `Attach another (${paths.length}/${MAX_EVIDENCE_FILES})`
           )}
         </button>
       )}

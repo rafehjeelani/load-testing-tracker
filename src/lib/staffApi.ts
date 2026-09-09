@@ -329,7 +329,7 @@ export async function listTestsForCurrentModerator(): Promise<Test[]> {
 export async function listCandidates(testId: string): Promise<CandidateListItem[]> {
   const { data: candidates, error: candErr } = await supabase
     .from("candidates")
-    .select("id, email, moderator_id, submitted, submitted_at")
+    .select("id, email, moderator_id, submitted, submitted_at, current_attempt")
     .eq("test_id", testId)
     .order("created_at");
   if (candErr) throw new StaffApiError(candErr.message);
@@ -340,22 +340,16 @@ export async function listCandidates(testId: string): Promise<CandidateListItem[
     .in("candidate_id", (candidates ?? []).map((c) => c.id));
   if (repErr) throw new StaffApiError(repErr.message);
 
-  // "Current status" for a step is its most recent row across every
-  // attempt, not strictly the latest attempt's own row -- a disconnection
-  // doesn't wipe a step's last real answer, since most steps don't actually
-  // need to be redone after one (only whichever ones the candidate/staff
-  // choose to touch again do). The full per-attempt history is what the
-  // Report page's Session Timeline uses instead, via
-  // listStepReportHistoryForTest.
-  const latestByCandidateStep = new Map<string, NonNullable<typeof reports>[number]>();
-  for (const r of reports ?? []) {
-    const key = `${r.candidate_id}:${r.step_id}`;
-    const existing = latestByCandidateStep.get(key);
-    if (!existing || r.attempt > existing.attempt) latestByCandidateStep.set(key, r);
-  }
+  const attemptByCandidate = new Map((candidates ?? []).map((c) => [c.id, c.current_attempt]));
 
   const byCandidate = new Map<string, CandidateListItem["step_outcomes"]>();
-  for (const r of latestByCandidateStep.values()) {
+  for (const r of reports ?? []) {
+    // A step's history from before the candidate's current attempt is
+    // "current status" noise here -- only the latest generation counts
+    // toward what the Candidates table / funnel / step stats show. The full
+    // history (every attempt) is what the Report page's Session Timeline
+    // uses instead, via listStepReportHistoryForTest.
+    if (r.attempt !== attemptByCandidate.get(r.candidate_id)) continue;
     const existing = byCandidate.get(r.candidate_id) ?? {};
     existing[r.step_id] = {
       outcome: r.outcome,
@@ -466,20 +460,12 @@ export async function getCandidateFull(candidateId: string): Promise<CandidateFu
     .single();
   if (cErr) throw new StaffApiError(cErr.message);
 
-  const { data: allStepReports, error: srErr } = await supabase
+  const { data: step_reports, error: srErr } = await supabase
     .from("step_reports")
     .select("step_id, outcome, comment, evidence_paths, saved_at, attempt")
-    .eq("candidate_id", candidateId);
+    .eq("candidate_id", candidateId)
+    .eq("attempt", candidate.current_attempt);
   if (srErr) throw new StaffApiError(srErr.message);
-
-  // Same carry-forward rule as listCandidates: "current" is each step's
-  // most recent row across every attempt, not strictly the current one.
-  const latestByStep = new Map<string, NonNullable<typeof allStepReports>[number]>();
-  for (const r of allStepReports ?? []) {
-    const existing = latestByStep.get(r.step_id);
-    if (!existing || r.attempt > existing.attempt) latestByStep.set(r.step_id, r);
-  }
-  const step_reports = [...latestByStep.values()];
 
   const { data: issues, error: iErr } = await supabase
     .from("issues")
@@ -490,7 +476,7 @@ export async function getCandidateFull(candidateId: string): Promise<CandidateFu
 
   return {
     candidate,
-    step_reports: (step_reports as StepReport[]).map((r) => ({ ...r, evidence_paths: r.evidence_paths ?? [] })),
+    step_reports: ((step_reports ?? []) as StepReport[]).map((r) => ({ ...r, evidence_paths: r.evidence_paths ?? [] })),
     issues: (issues ?? []) as Issue[],
   };
 }

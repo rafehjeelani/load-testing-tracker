@@ -171,20 +171,20 @@ export default function StepForm() {
             created_at: new Date().toISOString(),
           },
         ],
-        // Logging a disconnection starts a fresh attempt server-side, but
-        // state.step_reports is left exactly as it is -- most steps don't
-        // actually need to be redone after a disconnection (only whichever
-        // ones the candidate touches again do), so each step keeps showing
-        // its last real answer instead of resetting to blank. Re-answering
-        // a step still writes a new, separately-timestamped row under the
-        // new attempt, same as before.
+        // Logging a disconnection starts a fresh attempt server-side -- the
+        // old answers aren't deleted (they stay in the database, and feed
+        // the Report's Session Timeline), but this session should stop
+        // showing them: every step reappears as "not yet reported," and the
+        // next save for it becomes a new, separately-timestamped row. The
+        // network check's report is kept, since it's exempt from attempts.
+        step_reports: state.step_reports.filter((r) => r.step_id === networkCheckStep?.id),
         candidate: { ...state.candidate, current_attempt: state.candidate.current_attempt + 1 },
       },
     });
-    // A disconnection takes the candidate back to Step 1 -- not because
-    // they need to redo anything (most steps carry their answer forward
-    // unchanged), just so they land somewhere predictable and can click
-    // through to whichever step actually needs a fresh look.
+    // A disconnection restarts the candidate at Step 1 -- their already-saved
+    // answers for every step are untouched, only where they're looking
+    // resets. The network check is not repeated (pastNetworkCheck is a
+    // separate flag this never touches).
     setCurrentStepIndex(0);
     setViewMode("wizard");
     setNudgeStepId(null);
@@ -286,6 +286,7 @@ export default function StepForm() {
         onSave={(outcome, comment, evidencePaths) => handleSaveStep(networkCheckStep.id, outcome, comment, evidencePaths)}
         onUpload={handleUpload}
         onViewEvidence={handleViewEvidence}
+        onEditSavedAt={(savedAtIso) => handleEditSavedAt(networkCheckStep.id, savedAtIso)}
         onContinue={() => setPastNetworkCheck(true)}
       />
     );
@@ -371,7 +372,12 @@ export default function StepForm() {
             </p>
 
             <StepRow
-              key={currentStep.id}
+              // The attempt is folded into the key alongside the step id so a
+              // disconnection forces a remount even when currentStepIndex was
+              // already 0 -- otherwise StepRow (whose state only reads its
+              // initial* props once, on mount) would keep showing the prior
+              // attempt's now-superseded answer instead of resetting to blank.
+              key={`${currentStep.id}-${state.candidate.current_attempt}`}
               name={currentStep.name}
               stepRequired={currentStep.required}
               radioGroup={`step-${currentStep.id}`}
