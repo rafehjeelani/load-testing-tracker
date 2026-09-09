@@ -10,7 +10,6 @@ interface Row {
   moderator: Moderator;
   assigned: number;
   completed: number;
-  withIssues: number;
   blocked: number;
 }
 
@@ -41,8 +40,6 @@ export default function Moderators() {
           moderator: m,
           assigned: mine.length,
           completed: mine.filter((c) => c.submitted).length,
-          withIssues: mine.filter((c) => Object.values(c.step_outcomes).some((r) => r.outcome === "with_issues"))
-            .length,
           blocked: mine.filter((c) => Object.values(c.step_outcomes).some((r) => r.outcome === "unable")).length,
         };
       })
@@ -93,7 +90,7 @@ export default function Moderators() {
           <table className="w-full text-[13.5px]">
             <thead>
               <tr className="bg-surface-2">
-                {["Moderator", "Role", "Candidates", "Completed", "With Issues", "Blocked"].map((h, i) => (
+                {["Moderator", "Role", "Candidates", "Completed", "Blocked"].map((h, i) => (
                   <th
                     key={h}
                     className={`px-4 py-2.5 text-[11.5px] font-semibold text-text-3 uppercase tracking-wide border-b border-border ${
@@ -108,7 +105,7 @@ export default function Moderators() {
             <tbody>
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-6 text-center text-text-3">
+                  <td colSpan={5} className="px-4 py-6 text-center text-text-3">
                     No moderators have candidates assigned on this test yet.
                   </td>
                 </tr>
@@ -123,7 +120,6 @@ export default function Moderators() {
                   </td>
                   <td className="px-4 py-2.5 text-center font-mono-tabular">{r.assigned}</td>
                   <td className="px-4 py-2.5 text-center font-mono-tabular">{r.completed}</td>
-                  <td className="px-4 py-2.5 text-center font-mono-tabular">{r.withIssues}</td>
                   <td className="px-4 py-2.5 text-center font-mono-tabular">{r.blocked}</td>
                 </tr>
               ))}

@@ -120,7 +120,7 @@ export default function CandidateForm() {
     return sortedSteps
       .filter((s) => {
         const r = reportByStep.get(s.id);
-        return (r?.outcome === "with_issues" || r?.outcome === "unable") && !r.comment?.trim();
+        return r?.outcome === "unable" && !r.comment?.trim();
       })
       .map((s) => s.name);
   }

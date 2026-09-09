@@ -23,7 +23,8 @@ The candidate side never gets a Supabase Auth session — it identifies people p
 ```
 src/
   routes/
-    candidate/     the self-report form (EmailGate -> StepForm -> StepRow)
+    candidate/     the self-report form (EmailGate -> StepForm, a wizard/preview orchestrator ->
+                   NetworkCheck, StepRow, StepPreview)
     staff/         shared staff auth/login/nav (AuthContext, Login, RequireRole, TopNav, ResetPassword)
                    + CandidateForm (one candidate's report, used by both admin and moderator)
     admin/         TestList, Users, CreateTest, Candidates, Steps, Moderators, Report, ModeratorSelect
@@ -43,6 +44,9 @@ supabase/
                      0007_user_active_status.sql (profiles.active, for deactivate/reactivate)
                      0008_clear_saved_at_on_uncheck.sql / 0009_fix_uncheck_saved_at_preserve.sql
                      (un-checking a step's outcome clears/preserves its recorded time)
+                     0010_two_outcomes.sql (outcome collapses from 3 values to 2: completed / unable)
+                     0011_network_check_step.sql (steps.is_network_check, the fixed one-time gate)
+                     0012_fix_issues_step_delete.sql (issues.step_id on delete cascade)
   functions/        create-moderator (Edge Function — invites a new admin or moderator)
                      manage-users (Edge Function — admin: delete/deactivate/reactivate a user, change
                      their login email, generate invite/reset links without sending email)
@@ -155,3 +159,22 @@ A new `/admin/users` page lists every admin/moderator account across the whole o
 - **Live inline nudge**: a step whose outcome requires a comment (with issues / unable to complete) or evidence, but doesn't have one yet, shows an inline warning right on that step — not just at submit time.
 - **Submit-time nudge**: clicking Submit with incomplete required steps still shows the existing summary message, but now also scrolls to and briefly highlights the first incomplete one, instead of leaving the candidate to hunt through the whole form for it by name.
 - **Skipped-step nudge**: picking an outcome for a step while an earlier step is still completely untouched shows a dismissible banner naming the skipped step(s) — catches the "filled in step 5, forgot steps 2–4" case that the existing required-field validation wouldn't (an untouched optional-looking gap, not a missing comment/evidence on a step that was actually started).
+
+### Report refinements: step filter, tooltips, idle moderators, funnel correction
+
+- **Session Timeline step filter**: a checklist of every step name (with Select all / Clear all) above the chart lets an admin isolate specific steps' events instead of always seeing all of them together — dot color stays tied to outcome rather than step identity, since color-coding a dozen-plus steps at once would be indistinguishable at a glance.
+- **Hover tooltips** on every summary stat explaining what it counts, and **"Registered" renamed to "Invited"** (both the stat tile and the funnel's first row) to match how candidates actually get into a test.
+- **Moderator Distribution hides moderators with zero candidates** on the test, instead of listing the org's entire moderator roster.
+- **Candidate Funnel excludes "unable" outcomes from each step's count** — a candidate who was unable to complete a step didn't actually make it through it, so counting them toward that stage overstated how far the cohort progressed. Biggest Drop-Off recalculates from the corrected counts.
+
+### Step-by-step wizard, a one-time network check, disconnection restart, and a two-outcome model
+
+The candidate form was one long scrolling page listing every step at once; it's now a step-by-step wizard, with several related changes that came with it:
+
+- **Outcomes collapse from three to two**: "Completed without issues" and "Completed with issues" merge into a single **Completed**, alongside **Was not able to complete** — the "with issues" nuance is still capturable via the step's own comment/evidence, which was never gated on that distinction anyway. Required a data migration (`0010_two_outcomes.sql`) merging existing rows and narrowing the `outcome` check constraint, plus removing every now-meaningless "With Issues" stat/column across `Report.tsx`, the Moderators workload table, and the moderator Dashboard.
+- **The network check is a fixed, one-time gate**, not an admin-configured step — every candidate does it once, right after the email gate, before Step 1, and it's never shown again for the rest of their session (including after a disconnection restart). Implemented as an ordinary `steps` row flagged `is_network_check` rather than a parallel data model, so it reuses the exact same evidence/comment/timestamp machinery as any other step; `listSteps()` excludes it by default, so every existing consumer (admin Steps page, per-step report columns, `copyStepsFromTest`) automatically leaves it out with no other changes. `0011_network_check_step.sql` backfills existing tests by flagging an existing "Network test"-named first step in place (preserving its real history) rather than duplicating it, and `createTest()` now inserts one automatically for every new test.
+- **The wizard shows one step at a time**, with a **Next** button (becoming **Review & Submit** on the last step), a **← Back** button, and a step-name dropdown to jump directly to any step. **Picking an outcome is now mandatory before Next is enabled** — previously a step with no outcome recorded at all wasn't blocked. The skipped-step nudge now triggers on navigation past an untouched earlier step, since that's the only way skipping can happen in a wizard.
+- **A "Preview" button shows a read-only summary** of every step's current answer (outcome, comment, evidence, timestamp) on one page, with Submit Form (and its validation) living there instead of in the wizard; clicking a step in Preview jumps back into the wizard at that step to edit it. A failed submit now switches back into the wizard at the first incomplete step and highlights it, instead of scrolling within a page that no longer lists every step at once.
+- **"Add Issue / Disconnection" is relabeled "Disconnection"** at the top of both the wizard and Preview (same modal, still requires a comment and evidence). Logging one resets the candidate back to Step 1 — already-saved answers for every step are untouched, only where they're looking resets, matching "refreshing the assessment page and starting from the beginning."
+- **Report gets three new activity counters**: Forms Submitted, Steps Submitted (total step outcomes recorded across every candidate), and Disconnections Logged, plus a small proportional bar comparing steps vs disconnections.
+- **Fixed a real, pre-existing bug surfaced while testing this**: deleting a test with a candidate whose logged issue referenced a specific step failed outright (`issues_step_id_fkey` had no delete action, while `issues.candidate_id` already cascaded — Postgres could hit the step-side constraint before the candidate-side cascade removed the row). `0012_fix_issues_step_delete.sql` adds `on delete cascade` to match.

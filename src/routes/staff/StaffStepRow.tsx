@@ -36,7 +36,7 @@ export default function StaffStepRow({
   const [savedAt, setSavedAt] = useState<string | null>(initialSavedAt);
   const [editingTime, setEditingTime] = useState(false);
   const [editingTimeValue, setEditingTimeValue] = useState("");
-  const commentRequired = outcome === "with_issues" || outcome === "unable";
+  const commentRequired = outcome === "unable";
 
   async function handleOutcomeChange(next: Outcome) {
     setOutcome(next);

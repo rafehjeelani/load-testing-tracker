@@ -1,4 +1,4 @@
-export type Outcome = "without_issues" | "with_issues" | "unable";
+export type Outcome = "completed" | "unable";
 export type StaffRole = "admin" | "moderator";
 
 export const MAX_EVIDENCE_FILES = 5;
@@ -9,6 +9,9 @@ export interface Step {
   name: string;
   order_index: number;
   required: boolean;
+  /** A fixed, non-admin-configurable check every candidate does once, before
+   *  the regular step wizard -- excluded from every ordinary step listing. */
+  is_network_check: boolean;
 }
 
 export interface StepReport {

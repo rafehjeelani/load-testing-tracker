@@ -10,11 +10,15 @@ import {
   upsertStepReport,
   uploadEvidence,
 } from "../../lib/candidateApi";
-import { Badge, Button, PageHeader } from "../../components/ui";
+import { Button, PageHeader } from "../../components/ui";
 import { Logo } from "../../components/Logo";
 import StepRow from "./StepRow";
+import StepPreview from "./StepPreview";
+import NetworkCheck from "./NetworkCheck";
 import IssuesSection, { type IssuesSectionHandle } from "../../components/IssuesSection";
 import type { Outcome, Step } from "../../types";
+
+type ViewMode = "wizard" | "preview";
 
 export default function StepForm() {
   const { testSlug } = useParams<{ testSlug: string }>();
@@ -23,8 +27,22 @@ export default function StepForm() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [nudgeStepId, setNudgeStepId] = useState<string | null>(null);
   const [skippedStepNames, setSkippedStepNames] = useState<string[]>([]);
+  const [currentStepIndex, setCurrentStepIndex] = useState(0);
+  const [viewMode, setViewMode] = useState<ViewMode>("wizard");
   const issuesRef = useRef<IssuesSectionHandle>(null);
-  const stepRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  // The network check is a fixed step flagged is_network_check -- it's
+  // excluded from the regular wizard/dropdown/preview list below.
+  // pastNetworkCheck initializes true when the candidate already has a
+  // recorded outcome for it (from *any* prior page load, since this reads
+  // real persisted state) -- that's what makes it "once ever," not just
+  // "once per render," and correctly keeps it from reappearing after a
+  // disconnection restart (which never touches this flag).
+  const networkCheckStep = session?.state.steps.find((s) => s.is_network_check);
+  const networkCheckReport = networkCheckStep
+    ? session?.state.step_reports.find((r) => r.step_id === networkCheckStep.id)
+    : undefined;
+  const [pastNetworkCheck, setPastNetworkCheck] = useState(() => !!networkCheckReport?.outcome);
 
   if (!session || session.testSlug !== testSlug) {
     // No live session for this test (fresh load, refresh, or a different
@@ -68,17 +86,6 @@ export default function StepForm() {
       email,
       state: { ...state, step_reports: updatedReports },
     });
-
-    // Nudge about any earlier step that's still completely untouched --
-    // only for a genuine new outcome pick, not every comment/evidence edit
-    // (those call this too, with the outcome unchanged).
-    if (outcome !== null && existing?.outcome !== outcome) {
-      const stepIndex = sortedSteps.findIndex((s) => s.id === stepId);
-      const updatedByStep = new Map(updatedReports.map((r) => [r.step_id, r]));
-      const skipped = sortedSteps.slice(0, stepIndex).filter((s) => !updatedByStep.get(s.id)?.outcome);
-      setSkippedStepNames(skipped.map((s) => s.name));
-    }
-
     return result;
   }
 
@@ -127,6 +134,14 @@ export default function StepForm() {
         ],
       },
     });
+    // A disconnection restarts the candidate at Step 1 -- their already-saved
+    // answers for every step are untouched, only where they're looking
+    // resets. The network check is not repeated (pastNetworkCheck is a
+    // separate flag this never touches).
+    setCurrentStepIndex(0);
+    setViewMode("wizard");
+    setNudgeStepId(null);
+    setSkippedStepNames([]);
   }
 
   async function handleEditIssueTime(issueId: string, createdAtIso: string) {
@@ -148,7 +163,7 @@ export default function StepForm() {
 
   function stepMissingComment(step: Step): boolean {
     const r = reportByStep.get(step.id);
-    return (r?.outcome === "with_issues" || r?.outcome === "unable") && !r.comment?.trim();
+    return r?.outcome === "unable" && !r.comment?.trim();
   }
 
   function missingEvidenceSteps(): string[] {
@@ -157,6 +172,17 @@ export default function StepForm() {
 
   function missingCommentSteps(): string[] {
     return sortedSteps.filter(stepMissingComment).map((s) => s.name);
+  }
+
+  /** Shared navigation for Next, the step dropdown, and jumping in from
+   *  Preview -- also where the "you skipped a step" nudge is computed,
+   *  since with a wizard, skipping can only ever happen by navigating past
+   *  an untouched earlier step (there's no single page left to save into). */
+  function goToStep(index: number) {
+    const skipped = sortedSteps.slice(0, index).filter((s) => !reportByStep.get(s.id)?.outcome);
+    setSkippedStepNames(skipped.map((s) => s.name));
+    setCurrentStepIndex(index);
+    setViewMode("wizard");
   }
 
   async function handleSubmitForm() {
@@ -173,8 +199,10 @@ export default function StepForm() {
       setSubmitError(`Please ${parts.join("; and ")}.`);
       const firstIncomplete = sortedSteps.find((s) => stepMissingEvidence(s) || stepMissingComment(s));
       if (firstIncomplete) {
+        const index = sortedSteps.findIndex((s) => s.id === firstIncomplete.id);
+        setCurrentStepIndex(index);
+        setViewMode("wizard");
         setNudgeStepId(firstIncomplete.id);
-        stepRefs.current[firstIncomplete.id]?.scrollIntoView({ behavior: "smooth", block: "center" });
         setTimeout(() => setNudgeStepId((id) => (id === firstIncomplete.id ? null : id)), 2500);
       }
       return;
@@ -197,8 +225,29 @@ export default function StepForm() {
     }
   }
 
-  const sortedSteps = [...state.steps].sort((a, b) => a.order_index - b.order_index);
+  const sortedSteps = [...state.steps].filter((s) => !s.is_network_check).sort((a, b) => a.order_index - b.order_index);
   const reportByStep = new Map(state.step_reports.map((r) => [r.step_id, r]));
+
+  // The network check gate: shown until the candidate explicitly continues
+  // past it, which only ever happens once (pastNetworkCheck sticks for the
+  // rest of the session, including across disconnection restarts).
+  if (networkCheckStep && !pastNetworkCheck) {
+    return (
+      <NetworkCheck
+        step={networkCheckStep}
+        report={networkCheckReport}
+        onSave={(outcome, comment, evidencePaths) => handleSaveStep(networkCheckStep.id, outcome, comment, evidencePaths)}
+        onUpload={handleUpload}
+        onViewEvidence={handleViewEvidence}
+        onEditSavedAt={(savedAtIso) => handleEditSavedAt(networkCheckStep.id, savedAtIso)}
+        onContinue={() => setPastNetworkCheck(true)}
+      />
+    );
+  }
+
+  const currentStep = sortedSteps[currentStepIndex];
+  const isLastStep = currentStepIndex === sortedSteps.length - 1;
+  const currentOutcome = currentStep ? reportByStep.get(currentStep.id)?.outcome : null;
 
   return (
     <div className="min-h-screen bg-bg text-text">
@@ -222,26 +271,31 @@ export default function StepForm() {
             </span>
             <Button
               variant="secondary"
+              onClick={() => setViewMode(viewMode === "preview" ? "wizard" : "preview")}
+              className="flex items-center gap-1.5 whitespace-nowrap"
+            >
+              <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+              {viewMode === "preview" ? "Back to Steps" : "Preview"}
+            </Button>
+            <Button
+              variant="secondary"
               onClick={() => issuesRef.current?.open()}
               className="flex items-center gap-1.5 whitespace-nowrap"
             >
               <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path d="M12 5v14M5 12h14" />
+                <path d="M18.36 5.64a9 9 0 11-12.73 0" />
+                <path d="M12 2v6" />
               </svg>
-              Add Issue / Disconnection
+              Disconnection
             </Button>
           </div>
         </div>
       </PageHeader>
 
       <div className="max-w-[760px] mx-auto px-6 pt-5 pb-14">
-        <p className="text-[12.5px] text-text-3 mb-4 leading-relaxed">
-          While you take the test in the other tab, mark how each step actually went below. Your
-          answers save automatically as you type — the timestamp on each step is stamped the
-          moment you pick an option, but you can keep editing the comment and evidence anytime.
-          Evidence is required for every step.
-        </p>
-
         {skippedStepNames.length > 0 && (
           <div className="flex items-start gap-2 bg-warning-soft border border-warning-border rounded-[10px] px-4 py-3 mb-4 text-[12.5px] text-warning">
             <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="shrink-0 mt-0.5">
@@ -262,34 +316,80 @@ export default function StepForm() {
           </div>
         )}
 
-        {sortedSteps.map((step) => {
-          const report = reportByStep.get(step.id);
-          return (
-            <div
-              key={step.id}
-              ref={(el) => {
-                stepRefs.current[step.id] = el;
-              }}
-            >
-              <StepRow
-                name={step.name}
-                stepRequired={step.required}
-                radioGroup={`step-${step.id}`}
-                initialOutcome={report?.outcome ?? null}
-                initialComment={report?.comment ?? ""}
-                initialEvidencePaths={report?.evidence_paths ?? []}
-                initialSavedAt={report?.saved_at ?? null}
-                highlighted={nudgeStepId === step.id}
-                onSave={(outcome, comment, evidencePaths) =>
-                  handleSaveStep(step.id, outcome, comment, evidencePaths)
-                }
-                onUpload={handleUpload}
-                onViewEvidence={handleViewEvidence}
-                onEditSavedAt={(savedAtIso) => handleEditSavedAt(step.id, savedAtIso)}
-              />
+        {viewMode === "wizard" && currentStep ? (
+          <>
+            <p className="text-[12.5px] text-text-3 mb-4 leading-relaxed">
+              Mark how this step actually went below. Your answers save automatically as you type —
+              the timestamp is stamped the moment you pick an option. Evidence is required for every
+              step.
+            </p>
+
+            <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+              <span className="font-mono-tabular text-[12px] text-text-3 shrink-0">
+                Step {currentStepIndex + 1} of {sortedSteps.length}
+              </span>
+              <select
+                value={currentStepIndex}
+                onChange={(e) => goToStep(Number(e.target.value))}
+                className="px-2.5 py-1.5 border border-border rounded-[6px] bg-surface text-[12.5px]"
+              >
+                {sortedSteps.map((s, i) => (
+                  <option key={s.id} value={i}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
             </div>
-          );
-        })}
+
+            <StepRow
+              key={currentStep.id}
+              name={currentStep.name}
+              stepRequired={currentStep.required}
+              radioGroup={`step-${currentStep.id}`}
+              initialOutcome={reportByStep.get(currentStep.id)?.outcome ?? null}
+              initialComment={reportByStep.get(currentStep.id)?.comment ?? ""}
+              initialEvidencePaths={reportByStep.get(currentStep.id)?.evidence_paths ?? []}
+              initialSavedAt={reportByStep.get(currentStep.id)?.saved_at ?? null}
+              highlighted={nudgeStepId === currentStep.id}
+              onSave={(outcome, comment, evidencePaths) => handleSaveStep(currentStep.id, outcome, comment, evidencePaths)}
+              onUpload={handleUpload}
+              onViewEvidence={handleViewEvidence}
+              onEditSavedAt={(savedAtIso) => handleEditSavedAt(currentStep.id, savedAtIso)}
+            />
+
+            <div className="flex items-center gap-2">
+              {currentStepIndex > 0 && (
+                <Button variant="ghost" onClick={() => goToStep(currentStepIndex - 1)}>
+                  ← Back
+                </Button>
+              )}
+              <Button
+                onClick={() => (isLastStep ? setViewMode("preview") : goToStep(currentStepIndex + 1))}
+                disabled={!currentOutcome}
+                className="flex-1"
+              >
+                {isLastStep ? "Review & Submit" : "Next"}
+              </Button>
+            </div>
+            {!currentOutcome && (
+              <div className="text-[12px] text-text-3 mt-1.5">Pick an outcome above to continue.</div>
+            )}
+          </>
+        ) : (
+          <StepPreview
+            steps={sortedSteps}
+            reportByStep={reportByStep}
+            onEditStep={goToStep}
+            onDownloadEvidence={async (path) => {
+              window.open(await handleViewEvidence(path), "_blank");
+            }}
+            getPreviewUrl={handleViewEvidence}
+            submitted={state.candidate.submitted}
+            submitting={submitting}
+            submitError={submitError}
+            onSubmit={handleSubmitForm}
+          />
+        )}
 
         <IssuesSection
           ref={issuesRef}
@@ -306,20 +406,6 @@ export default function StepForm() {
 
         <div className="text-[12px] text-text-3 text-center mt-2">
           Your answers save automatically as you go. You can close this tab and come back anytime.
-        </div>
-
-        <div className="bg-surface border border-border rounded-[10px] p-5.5 mt-5 text-center">
-          <Badge variant={state.candidate.submitted ? "success" : "neutral"}>
-            {state.candidate.submitted ? "Submitted" : "Not Submitted"}
-          </Badge>
-          <div className="text-[13px] text-text-2 max-w-[440px] mx-auto my-4 leading-relaxed">
-            Submitting lets the test team know you're done reporting. You can still edit your
-            answers and resubmit afterward — this just marks where things stand right now.
-          </div>
-          {submitError && <div className="text-[12.5px] text-danger mb-3 max-w-[440px] mx-auto">{submitError}</div>}
-          <Button onClick={handleSubmitForm} disabled={submitting} className="min-w-[220px]">
-            {state.candidate.submitted ? "Resubmit Form" : "Submit Form"}
-          </Button>
         </div>
       </div>
     </div>

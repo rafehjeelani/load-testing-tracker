@@ -41,9 +41,6 @@ export default function ModeratorDashboard() {
 
   const filtered = candidates.filter((c) => c.email.toLowerCase().includes(search.toLowerCase()));
   const completedAllSteps = candidates.filter((c) => steps.every((s) => c.step_outcomes[s.id]?.outcome)).length;
-  const withIssues = candidates.filter((c) =>
-    Object.values(c.step_outcomes).some((r) => r.outcome === "with_issues"),
-  ).length;
   const unable = candidates.filter((c) => Object.values(c.step_outcomes).some((r) => r.outcome === "unable")).length;
 
   return (
@@ -64,11 +61,10 @@ export default function ModeratorDashboard() {
         <div className="text-[12.5px] text-text-3 mt-1">Your assigned candidates</div>
       </PageHeader>
       <div className="max-w-[1240px] mx-auto px-8 pt-5 pb-7">
-        <div className="grid grid-cols-4 gap-3 mb-5">
+        <div className="grid grid-cols-3 gap-3 mb-5">
           {[
             ["Assigned", candidates.length, "text-text"],
             ["Completed All Steps", completedAllSteps, "text-success"],
-            ["With Issues", withIssues, "text-warning"],
             ["Unable to Complete", unable, "text-danger"],
           ].map(([label, value, color]) => (
             <div key={label as string} className="bg-surface border border-border rounded-[10px] p-4">

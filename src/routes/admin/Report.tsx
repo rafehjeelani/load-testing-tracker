@@ -8,8 +8,7 @@ import { TopNav } from "../staff/TopNav";
 import { useAsyncLoad } from "../../lib/useAsyncLoad";
 
 const OUTCOME_DOT_COLOR: Record<string, string> = {
-  without_issues: "var(--success)",
-  with_issues: "var(--warning)",
+  completed: "var(--success)",
   unable: "var(--danger)",
 };
 
@@ -64,12 +63,15 @@ export default function Report() {
   const invited = candidates.length;
   const startedForm = candidates.filter((c) => Object.values(c.step_outcomes).some((r) => r.outcome)).length;
   const completedAllSteps = candidates.filter((c) => steps.every((s) => c.step_outcomes[s.id]?.outcome)).length;
-  const withIssues = candidates.filter((c) =>
-    Object.values(c.step_outcomes).some((r) => r.outcome === "with_issues"),
-  ).length;
   const unableToComplete = candidates.filter((c) =>
     Object.values(c.step_outcomes).some((r) => r.outcome === "unable"),
   ).length;
+  const formsSubmitted = candidates.filter((c) => c.submitted).length;
+  const stepsSubmitted = steps.reduce(
+    (sum, s) => sum + candidates.filter((c) => c.step_outcomes[s.id]?.outcome).length,
+    0,
+  );
+  const disconnectionsLogged = issues.length;
 
   const summaryStats = [
     { label: "Invited", value: invited, color: "text-text", description: "Candidates added to this test." },
@@ -84,12 +86,6 @@ export default function Report() {
       value: completedAllSteps,
       color: "text-success",
       description: "Candidates who have recorded an outcome for every step in this test.",
-    },
-    {
-      label: "With Issues",
-      value: withIssues,
-      color: "text-warning",
-      description: "Candidates who reported “Completed with issues” on at least one step.",
     },
     {
       label: "Unable to Complete",
@@ -124,11 +120,10 @@ export default function Report() {
   const stepStats = steps.map((s) => {
     const outcomes = candidates.map((c) => c.step_outcomes[s.id]?.outcome).filter(Boolean);
     const attempted = outcomes.length;
-    const successful = outcomes.filter((o) => o === "without_issues").length;
-    const issues = outcomes.filter((o) => o === "with_issues").length;
+    const successful = outcomes.filter((o) => o === "completed").length;
     const unable = outcomes.filter((o) => o === "unable").length;
-    const issueRate = attempted ? ((issues + unable) / attempted) * 100 : 0;
-    return { step: s, attempted, successful, issues, unable, issueRate };
+    const unableRate = attempted ? (unable / attempted) * 100 : 0;
+    return { step: s, attempted, successful, unable, unableRate };
   });
 
   const timelineRows = candidates
@@ -189,7 +184,6 @@ export default function Report() {
         moderator: m,
         assigned: mine.length,
         completed: mine.filter((c) => c.submitted).length,
-        withIssues: mine.filter((c) => Object.values(c.step_outcomes).some((r) => r.outcome === "with_issues")).length,
         blocked: mine.filter((c) => Object.values(c.step_outcomes).some((r) => r.outcome === "unable")).length,
       };
     })
@@ -215,7 +209,7 @@ export default function Report() {
         </div>
       </PageHeader>
       <div className="max-w-[1240px] mx-auto px-8 pt-5 pb-7">
-        <div className="grid grid-cols-5 gap-3 mb-8">
+        <div className="grid grid-cols-4 gap-3 mb-4">
           {summaryStats.map((s) => (
             <div key={s.label} className="bg-surface border border-border rounded-[10px] p-4">
               <div
@@ -231,6 +225,55 @@ export default function Report() {
               <div className={`font-mono-tabular text-2xl font-semibold mt-1.5 ${s.color}`}>{s.value}</div>
             </div>
           ))}
+        </div>
+
+        <div className="grid grid-cols-[1fr_1fr_1fr_1.4fr] gap-3 mb-8 items-stretch">
+          {[
+            { label: "Forms Submitted", value: formsSubmitted, description: "Candidates who have clicked Submit Form." },
+            {
+              label: "Steps Submitted",
+              value: stepsSubmitted,
+              description: "Total step outcomes recorded across every candidate in this test.",
+            },
+            {
+              label: "Disconnections Logged",
+              value: disconnectionsLogged,
+              description: "Total disconnections logged across every candidate in this test.",
+            },
+          ].map((s) => (
+            <div key={s.label} className="bg-surface border border-border rounded-[10px] p-4">
+              <div title={s.description} className="text-[11.5px] font-semibold text-text-3 uppercase tracking-wide cursor-help">
+                {s.label}
+              </div>
+              <div className="font-mono-tabular text-2xl font-semibold mt-1.5 text-text">{s.value}</div>
+            </div>
+          ))}
+          <div className="bg-surface border border-border rounded-[10px] p-4 flex flex-col justify-center">
+            <div className="text-[11.5px] font-semibold text-text-3 uppercase tracking-wide mb-2">
+              Steps vs Disconnections
+            </div>
+            {stepsSubmitted + disconnectionsLogged > 0 ? (
+              <>
+                <div className="h-3 rounded-full overflow-hidden flex bg-surface-2">
+                  <div
+                    className="h-full bg-accent"
+                    style={{ width: `${(stepsSubmitted / (stepsSubmitted + disconnectionsLogged)) * 100}%` }}
+                    title={`${stepsSubmitted} steps`}
+                  />
+                  <div
+                    className="h-full bg-danger"
+                    style={{ width: `${(disconnectionsLogged / (stepsSubmitted + disconnectionsLogged)) * 100}%` }}
+                    title={`${disconnectionsLogged} disconnections`}
+                  />
+                </div>
+                <div className="font-mono-tabular text-[12px] text-text-2 mt-1.5">
+                  {stepsSubmitted} steps · {disconnectionsLogged} disconnections
+                </div>
+              </>
+            ) : (
+              <div className="text-[13px] text-text-3">No activity yet.</div>
+            )}
+          </div>
         </div>
 
         <div className="mb-3 font-bold text-[15px]">Candidate Funnel</div>
@@ -390,11 +433,7 @@ export default function Report() {
               <div className="flex items-center gap-5 flex-wrap mt-3 text-[12px] text-text-2">
                 <span className="flex items-center gap-1.5">
                   <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: "var(--success)" }} />
-                  Step without issues
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: "var(--warning)" }} />
-                  Step with issues
+                  Step completed
                 </span>
                 <span className="flex items-center gap-1.5">
                   <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: "var(--danger)" }} />
@@ -417,7 +456,7 @@ export default function Report() {
           <table className="w-full text-[13.5px]">
             <thead>
               <tr className="bg-surface-2">
-                {["Step", "Attempted", "Successful", "Issues", "Unable", "Issue Rate"].map((h, i) => (
+                {["Step", "Attempted", "Successful", "Unable", "Unable Rate"].map((h, i) => (
                   <th
                     key={h}
                     className={`px-4 py-2.5 text-[11.5px] font-semibold text-text-3 uppercase tracking-wide border-b border-border ${
@@ -435,14 +474,13 @@ export default function Report() {
                   <td className="px-4 py-2.5 font-semibold">{s.step.name}</td>
                   <td className="px-4 py-2.5 text-center font-mono-tabular">{s.attempted}</td>
                   <td className="px-4 py-2.5 text-center font-mono-tabular">{s.successful}</td>
-                  <td className="px-4 py-2.5 text-center font-mono-tabular">{s.issues}</td>
                   <td className="px-4 py-2.5 text-center font-mono-tabular">{s.unable}</td>
                   <td
                     className={`px-4 py-2.5 text-center font-mono-tabular font-semibold ${
-                      s.issueRate > 0 ? "text-warning" : "text-success"
+                      s.unableRate > 0 ? "text-danger" : "text-success"
                     }`}
                   >
-                    {s.issueRate.toFixed(1)}%
+                    {s.unableRate.toFixed(1)}%
                   </td>
                 </tr>
               ))}
@@ -456,7 +494,7 @@ export default function Report() {
           <table className="w-full text-[13.5px]">
             <thead>
               <tr className="bg-surface-2">
-                {["Moderator", "Candidates", "Completed", "Issues", "Blocked"].map((h, i) => (
+                {["Moderator", "Candidates", "Completed", "Blocked"].map((h, i) => (
                   <th
                     key={h}
                     className={`px-4 py-2.5 text-[11.5px] font-semibold text-text-3 uppercase tracking-wide border-b border-border ${
@@ -471,7 +509,7 @@ export default function Report() {
             <tbody>
               {modRows.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-text-3">
+                  <td colSpan={4} className="px-4 py-6 text-center text-text-3">
                     No moderators have candidates assigned on this test yet.
                   </td>
                 </tr>
@@ -481,7 +519,6 @@ export default function Report() {
                   <td className="px-4 py-2.5 font-semibold">{r.moderator.full_name}</td>
                   <td className="px-4 py-2.5 text-center font-mono-tabular">{r.assigned}</td>
                   <td className="px-4 py-2.5 text-center font-mono-tabular">{r.completed}</td>
-                  <td className="px-4 py-2.5 text-center font-mono-tabular">{r.withIssues}</td>
                   <td className="px-4 py-2.5 text-center font-mono-tabular">{r.blocked}</td>
                 </tr>
               ))}

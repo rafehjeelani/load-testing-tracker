@@ -42,7 +42,7 @@ export default function StepRow({
   const [savedAt, setSavedAt] = useState<string | null>(initialSavedAt);
   const [editingTime, setEditingTime] = useState(false);
   const [editingTimeValue, setEditingTimeValue] = useState("");
-  const commentRequired = outcome === "with_issues" || outcome === "unable";
+  const commentRequired = outcome === "unable";
   const missingComment = commentRequired && !comment.trim();
   const missingEvidence = outcome !== null && evidencePaths.length === 0;
 

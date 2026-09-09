@@ -5,6 +5,7 @@ import type {
   CandidateListItem,
   Issue,
   Moderator,
+  Outcome,
   Profile,
   StaffRole,
   Step,
@@ -98,6 +99,18 @@ export async function createTest(name: string): Promise<Test> {
     .select("id, name, slug, created_at")
     .single();
   if (error) throw new StaffApiError(error.message);
+
+  // Every test gets its fixed network-check gate automatically -- it's not
+  // admin-configurable, so there's no "add step" UI for it.
+  const { error: networkCheckError } = await supabase.from("steps").insert({
+    test_id: data.id,
+    name: "Network Check",
+    order_index: -1,
+    required: true,
+    is_network_check: true,
+  });
+  if (networkCheckError) throw new StaffApiError(networkCheckError.message);
+
   return data as Test;
 }
 
@@ -116,12 +129,15 @@ export async function deleteTest(testId: string) {
 
 // --- Steps ---
 
+/** The ordinary, admin-configured steps for a test -- excludes the fixed
+ *  network-check step every test has, which isn't part of this list. */
 export function listSteps(testId: string): Promise<Step[]> {
   return unwrap(
     supabase
       .from("steps")
-      .select("id, name, order_index, required")
+      .select("id, name, order_index, required, is_network_check")
       .eq("test_id", testId)
+      .eq("is_network_check", false)
       .order("order_index"),
   );
 }
@@ -439,7 +455,7 @@ export async function getCandidateFull(candidateId: string): Promise<CandidateFu
 export async function upsertStepReportStaff(
   candidateId: string,
   stepId: string,
-  outcome: string | null,
+  outcome: Outcome | null,
   comment: string,
   evidencePaths: string[],
   stampSavedAt: boolean,
