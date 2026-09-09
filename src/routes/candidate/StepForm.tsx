@@ -104,6 +104,8 @@ export default function StepForm() {
         : upsertHistoryEntry(state.step_report_history, {
             step_id: stepId,
             outcome,
+            comment,
+            evidence_paths: evidencePaths,
             saved_at: nextSavedAt,
             attempt: state.candidate.current_attempt,
           });
@@ -129,6 +131,8 @@ export default function StepForm() {
             : upsertHistoryEntry(state.step_report_history, {
                 step_id: stepId,
                 outcome: state.step_reports.find((r) => r.step_id === stepId)?.outcome ?? null,
+                comment: state.step_reports.find((r) => r.step_id === stepId)?.comment ?? null,
+                evidence_paths: state.step_reports.find((r) => r.step_id === stepId)?.evidence_paths ?? [],
                 saved_at: savedAtIso,
                 attempt: state.candidate.current_attempt,
               }),

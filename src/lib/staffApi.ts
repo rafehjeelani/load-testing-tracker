@@ -487,11 +487,11 @@ export async function getCandidateFull(candidateId: string): Promise<CandidateFu
 export async function getCandidateStepHistory(candidateId: string): Promise<StepReportHistoryEntry[]> {
   const { data, error } = await supabase
     .from("step_reports")
-    .select("step_id, outcome, saved_at, attempt")
+    .select("step_id, outcome, comment, evidence_paths, saved_at, attempt")
     .eq("candidate_id", candidateId)
     .not("saved_at", "is", null);
   if (error) throw new StaffApiError(error.message);
-  return (data ?? []) as StepReportHistoryEntry[];
+  return ((data ?? []) as StepReportHistoryEntry[]).map((r) => ({ ...r, evidence_paths: r.evidence_paths ?? [] }));
 }
 
 export async function upsertStepReportStaff(

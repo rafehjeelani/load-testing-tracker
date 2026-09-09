@@ -98,6 +98,8 @@ export default function CandidateForm() {
       upsertHistoryEntry(h, {
         step_id: stepId,
         outcome,
+        comment,
+        evidence_paths: evidencePaths,
         saved_at: nextSavedAt,
         attempt: full!.candidate.current_attempt,
       }),
@@ -239,7 +241,13 @@ export default function CandidateForm() {
           );
         })}
 
-        <SessionLog steps={sortedSteps} history={history} issues={full.issues} />
+        <SessionLog
+          steps={sortedSteps}
+          history={history}
+          issues={full.issues}
+          onDownloadEvidence={handleDownload}
+          getPreviewUrl={getEvidenceDownloadUrl}
+        />
 
         <IssuesSection
           ref={issuesRef}

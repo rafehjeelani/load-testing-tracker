@@ -43,6 +43,8 @@ export interface StepReportHistoryRow {
 export interface StepReportHistoryEntry {
   step_id: string;
   outcome: Outcome | null;
+  comment: string | null;
+  evidence_paths: string[];
   saved_at: string | null;
   attempt: number;
 }

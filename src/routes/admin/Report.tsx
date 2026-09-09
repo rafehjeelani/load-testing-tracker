@@ -494,7 +494,7 @@ export default function Report() {
                               fill={OUTCOME_DOT_COLOR[e.outcome ?? ""] ?? "var(--text-3)"}
                             >
                               <title>
-                                {row.email} · {e.label} · {formatTime(new Date(e.time).toISOString())}
+                                {e.label} · {row.email} · {formatTime(new Date(e.time).toISOString())}
                               </title>
                             </circle>
                           ),
