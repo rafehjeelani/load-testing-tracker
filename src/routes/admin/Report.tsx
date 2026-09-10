@@ -26,6 +26,67 @@ interface TimelineEvent {
   outcome?: string;
 }
 
+// Session-duration metrics: each is measured from the named anchor step to
+// the "Session Completed" step (or, failing that, the last recorded event
+// for that candidate). These rely on matching steps by name, since steps
+// are admin-configured free text -- a test that doesn't use these exact
+// names simply won't have a value for that metric.
+const DURATION_METRICS = [
+  { key: "primary", label: "Primary", anchorStepName: "Face Captured" },
+  { key: "screen", label: "Screen", anchorStepName: "Screen Shared" },
+  { key: "secondary", label: "Secondary", anchorStepName: "Onboarding Completed (Orientation check Submitted)" },
+] as const;
+const END_STEP_NAME = "Session Completed";
+
+/** Sums only the active segments between an anchor step's occurrences: from
+ *  each answer up to the next disconnection that falls before the following
+ *  re-answer, plus the final answer through to endTime -- excluding the
+ *  disconnected gap(s) in between. Falls back to the naive full span (and
+ *  says so in the note) when a disconnection has no following re-answer to
+ *  pair it with. */
+function computeDurationSeconds(
+  anchorTimes: number[],
+  disconnectionTimes: number[],
+  endTime: number | null,
+): { seconds: number | null; note: string } {
+  if (anchorTimes.length === 0) return { seconds: null, note: "step not reported" };
+  if (endTime === null) return { seconds: null, note: "no end time available" };
+
+  let total = 0;
+  const notes: string[] = [];
+  for (let i = 0; i < anchorTimes.length; i++) {
+    const a = anchorTimes[i];
+    const nextAnchor = i + 1 < anchorTimes.length ? anchorTimes[i + 1] : null;
+    if (nextAnchor !== null) {
+      const dBetween = disconnectionTimes.find((d) => d > a && d < nextAnchor);
+      if (dBetween !== undefined) {
+        total += (dBetween - a) / 1000;
+      } else {
+        notes.push("re-answered without a disconnection logged in between");
+      }
+    } else {
+      total += (endTime - a) / 1000;
+      const hadDisconnectionAfter = disconnectionTimes.some((d) => d > a && d < endTime);
+      if (hadDisconnectionAfter) {
+        notes.push(
+          anchorTimes.length === 1
+            ? "includes disconnection downtime (step wasn't re-answered)"
+            : "includes downtime after the last answer",
+        );
+      }
+    }
+  }
+  if (total < 0) return { seconds: null, note: "negative duration -- check for out-of-order timestamps" };
+  return { seconds: total, note: notes.length ? notes.join("; ") : "clean" };
+}
+
+function formatDuration(seconds: number | null): string {
+  if (seconds === null) return "—";
+  const mins = Math.round(seconds / 60);
+  if (mins < 60) return `${mins}m`;
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+
 export default function Report() {
   const { testId } = useParams<{ testId: string }>();
   const [test, setTest] = useState<Test | null>(null);
@@ -80,7 +141,13 @@ export default function Report() {
 
   const invited = candidates.length;
   const startedForm = candidates.filter((c) => stepHistory.some((h) => h.candidate_email === c.email)).length;
-  const completedAllSteps = candidates.filter((c) => steps.every((s) => c.step_outcomes[s.id]?.outcome)).length;
+  // Mutually exclusive with unableToComplete on purpose: a candidate who
+  // finished every step but had "Completed with issues" on one of them
+  // belongs in Unable to Complete, not here -- otherwise the two tiles
+  // double-count that candidate and their sum can exceed the invited count.
+  const completedAllSteps = candidates.filter((c) =>
+    steps.every((s) => c.step_outcomes[s.id]?.outcome === "completed"),
+  ).length;
   const unableToComplete = candidates.filter((c) =>
     Object.values(c.step_outcomes).some((r) => r.outcome === "unable"),
   ).length;
@@ -96,6 +163,58 @@ export default function Report() {
     }))
     .sort((a, b) => a.email.localeCompare(b.email));
 
+  const candidateDurations = candidates
+    .map((c) => {
+      const ownHistory = stepHistory.filter((h) => h.candidate_email === c.email);
+      const disconnectionTimes = issues
+        .filter((i) => i.candidate_email === c.email)
+        .map((i) => new Date(i.created_at).getTime())
+        .sort((a, b) => a - b);
+
+      function timesForStepName(name: string): number[] {
+        const step = steps.find((s) => s.name === name);
+        if (!step) return [];
+        return ownHistory
+          .filter((h) => h.step_id === step.id)
+          .map((h) => new Date(h.saved_at!).getTime())
+          .sort((a, b) => a - b);
+      }
+
+      const endStepTimes = timesForStepName(END_STEP_NAME);
+      let endTime: number | null = null;
+      let endIsFallback = false;
+      if (endStepTimes.length > 0) {
+        endTime = endStepTimes[endStepTimes.length - 1];
+      } else {
+        const allTimes = [...ownHistory.map((h) => new Date(h.saved_at!).getTime()), ...disconnectionTimes];
+        endTime = allTimes.length ? Math.max(...allTimes) : null;
+        endIsFallback = endTime !== null;
+      }
+
+      const durations = DURATION_METRICS.map((m) => {
+        const anchorTimes = timesForStepName(m.anchorStepName);
+        const { seconds, note } = computeDurationSeconds(anchorTimes, disconnectionTimes, endTime);
+        const fullNote =
+          endIsFallback && seconds !== null
+            ? note === "clean"
+              ? "end time is the last recorded event, not Session Completed"
+              : `${note}; end time is the last recorded event, not Session Completed`
+            : note;
+        return { ...m, seconds, note: fullNote };
+      });
+
+      return { email: c.email, durations };
+    })
+    .sort((a, b) => a.email.localeCompare(b.email));
+
+  const durationTotals = DURATION_METRICS.map((m) => ({
+    ...m,
+    totalSeconds: candidateDurations.reduce((sum, c) => {
+      const d = c.durations.find((x) => x.key === m.key);
+      return sum + (d?.seconds ?? 0);
+    }, 0),
+  }));
+
   const summaryStats = [
     { label: "Invited", value: invited, color: "text-text", description: "Candidates added to this test." },
     {
@@ -108,7 +227,7 @@ export default function Report() {
       label: "Completed All Steps",
       value: completedAllSteps,
       color: "text-success",
-      description: "Candidates who have recorded an outcome for every step in this test.",
+      description: "Candidates who reported “Completed” (not “Completed with issues”) on every step in this test.",
     },
     {
       label: "Unable to Complete",
@@ -131,6 +250,15 @@ export default function Report() {
       }).length,
     })),
   ];
+  // A funnel can only ever narrow -- each stage's count is clamped to the
+  // stage before it. Without this, a candidate whose *current* attempt has
+  // a later step reported but an earlier one skipped (they jumped ahead via
+  // the step dropdown, or Skip'd a step that didn't need redoing after a
+  // disconnection) would make a later bar bigger than an earlier one, which
+  // isn't a sensible thing for a funnel to show.
+  for (let i = 1; i < funnel.length; i++) {
+    funnel[i].count = Math.min(funnel[i].count, funnel[i - 1].count);
+  }
   const maxFunnel = funnel[0]?.count || 1;
 
   let biggestDrop = { from: "", to: "", count: 0, pct: 0 };
@@ -344,6 +472,70 @@ export default function Report() {
                   >
                     {c.disconnections}
                   </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="mb-1 font-bold text-[15px]">Session Durations</div>
+        <div className="text-[12.5px] text-text-3 mb-3">
+          Primary = Face Captured → Session Completed. Screen = Screen Shared → Session Completed. Secondary
+          = Onboarding Completed (Orientation check Submitted) → Session Completed, since that's the event
+          when secondary recording starts. A step re-answered after a disconnection only counts the active
+          time (the disconnected gap is excluded); one that wasn't re-answered includes that downtime instead
+          — hover a highlighted value for details.
+        </div>
+        <div className="grid grid-cols-3 gap-3 mb-4">
+          {durationTotals.map((d) => (
+            <div key={d.key} className="bg-surface border border-border rounded-[10px] p-4">
+              <div className="text-[11.5px] font-semibold text-text-3 uppercase tracking-wide">
+                Total {d.label} Duration
+              </div>
+              <div className="font-mono-tabular text-2xl font-semibold mt-1.5 text-text">
+                {formatDuration(d.totalSeconds)}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="bg-surface border border-border rounded-[10px] overflow-x-auto mb-8">
+          <table className="w-full text-[13.5px]">
+            <thead>
+              <tr className="bg-surface-2">
+                {["Candidate", ...DURATION_METRICS.map((m) => m.label)].map((h, i) => (
+                  <th
+                    key={h}
+                    className={`px-4 py-2.5 text-[11.5px] font-semibold text-text-3 uppercase tracking-wide border-b border-border ${
+                      i === 0 ? "text-left" : "text-center"
+                    }`}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {candidateDurations.length === 0 && (
+                <tr>
+                  <td colSpan={1 + DURATION_METRICS.length} className="px-4 py-6 text-center text-text-3">
+                    No candidates on this test yet.
+                  </td>
+                </tr>
+              )}
+              {candidateDurations.map((c) => (
+                <tr key={c.email} className="border-b border-border-soft last:border-0">
+                  <td className="px-4 py-2.5 font-semibold">{c.email}</td>
+                  {c.durations.map((d) => (
+                    <td
+                      key={d.key}
+                      title={d.note !== "clean" ? d.note : undefined}
+                      className={`px-4 py-2.5 text-center font-mono-tabular ${
+                        d.seconds !== null && d.note !== "clean" ? "text-warning cursor-help" : ""
+                      }`}
+                    >
+                      {formatDuration(d.seconds)}
+                    </td>
+                  ))}
                 </tr>
               ))}
             </tbody>
