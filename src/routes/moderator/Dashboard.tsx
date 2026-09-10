@@ -40,7 +40,12 @@ export default function ModeratorDashboard() {
   if (!test || !testId) return null;
 
   const filtered = candidates.filter((c) => c.email.toLowerCase().includes(search.toLowerCase()));
-  const completedAllSteps = candidates.filter((c) => steps.every((s) => c.step_outcomes[s.id]?.outcome)).length;
+  // Mutually exclusive with `unable` on purpose -- a candidate who finished
+  // every step but had "Completed with issues" on one of them belongs in
+  // Completed With Issues, not here, matching the admin Report page.
+  const completedAllSteps = candidates.filter((c) =>
+    steps.every((s) => c.step_outcomes[s.id]?.outcome === "completed"),
+  ).length;
   const unable = candidates.filter((c) => Object.values(c.step_outcomes).some((r) => r.outcome === "unable")).length;
 
   return (
@@ -65,7 +70,7 @@ export default function ModeratorDashboard() {
           {[
             ["Assigned", candidates.length, "text-text"],
             ["Completed All Steps", completedAllSteps, "text-success"],
-            ["Unable to Complete", unable, "text-danger"],
+            ["Completed With Issues", unable, "text-danger"],
           ].map(([label, value, color]) => (
             <div key={label as string} className="bg-surface border border-border rounded-[10px] p-4">
               <div className="text-[11.5px] font-semibold text-text-3 uppercase tracking-wide">{label}</div>

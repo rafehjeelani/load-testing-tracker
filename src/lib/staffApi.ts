@@ -131,6 +131,33 @@ export async function deleteTest(testId: string) {
 
 // --- Steps ---
 
+/** The standard step list every new test is seeded with, matching the
+ *  Screenshot Evidence Guide's step-by-step timing table -- this is also
+ *  what the reference screenshots in `referenceScreenshots.ts` are keyed
+ *  against by name. Kept in the same order the guide lists them. */
+export const STANDARD_STEPS = [
+  "Session Joined",
+  "Consent Given",
+  "Audio detected",
+  "Face Captured",
+  "Screen Shared",
+  "Secondary device connected",
+  "360 env captured",
+  "Id check captured",
+  "Onboarding Completed (Orientation check Submitted)",
+  "Assessment",
+  "Session Completed",
+];
+
+/** Seeds a freshly-created test with the standard step list, in order, all
+ *  required. Used when a new test isn't copying steps from an existing one. */
+export async function seedStandardSteps(testId: string) {
+  const { error } = await supabase.from("steps").insert(
+    STANDARD_STEPS.map((name, i) => ({ test_id: testId, name, order_index: i, required: true })),
+  );
+  if (error) throw new StaffApiError(error.message);
+}
+
 /** The ordinary, admin-configured steps for a test -- excludes the fixed
  *  network-check step every test has, which isn't part of this list. */
 export function listSteps(testId: string): Promise<Step[]> {

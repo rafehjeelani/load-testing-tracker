@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { copyStepsFromTest, createTest, listTests, StaffApiError } from "../../lib/staffApi";
+import { copyStepsFromTest, createTest, listTests, seedStandardSteps, StaffApiError } from "../../lib/staffApi";
 import type { Test } from "../../types";
 import { Button, Card, FieldLabel, Input } from "../../components/ui";
 import { TopNav } from "../staff/TopNav";
@@ -26,7 +26,14 @@ export default function CreateTest() {
     setError(null);
     try {
       const test = await createTest(name.trim());
-      if (copyFrom !== NONE) await copyStepsFromTest(copyFrom, test.id);
+      // A test always starts with a full step list -- either copied from an
+      // existing test, or the standard list (matching the Screenshot
+      // Evidence Guide) so every new test is consistent by default.
+      if (copyFrom !== NONE) {
+        await copyStepsFromTest(copyFrom, test.id);
+      } else {
+        await seedStandardSteps(test.id);
+      }
       navigate(`/admin/tests/${test.id}/candidates`);
     } catch (err) {
       setError(err instanceof StaffApiError ? err.message : "Something went wrong. Please try again.");
@@ -41,7 +48,8 @@ export default function CreateTest() {
         <Card className="w-full max-w-[440px] p-8">
           <h1 className="text-[17px] font-bold mb-1.5">Create New Test</h1>
           <p className="text-[13px] text-text-2 mb-5 leading-relaxed">
-            You can add candidates, steps, and moderators after creating the test.
+            Starts with the standard step list. You can add candidates, moderators, or edit steps after
+            creating the test.
           </p>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div>
@@ -61,7 +69,7 @@ export default function CreateTest() {
                   onChange={(e) => setCopyFrom(e.target.value)}
                   className="w-full px-3 py-2.5 border border-border rounded-[7px] bg-surface text-text text-[13.5px]"
                 >
-                  <option value={NONE}>Don't copy steps</option>
+                  <option value={NONE}>Use the standard step list</option>
                   {existingTests.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.name}

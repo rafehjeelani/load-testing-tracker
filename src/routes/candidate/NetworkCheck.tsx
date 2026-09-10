@@ -2,6 +2,7 @@ import type { Outcome, Step, StepReport } from "../../types";
 import { Button } from "../../components/ui";
 import { Logo } from "../../components/Logo";
 import EvidenceList from "../../components/EvidenceList";
+import { REFERENCE_SCREENSHOTS } from "../../lib/referenceScreenshots";
 import { formatTime } from "../../lib/outcome";
 
 interface Props {
@@ -23,6 +24,7 @@ interface Props {
 export default function NetworkCheck({ step, report, onSave, onUpload, onViewEvidence, onContinue }: Props) {
   const evidencePaths = report?.evidence_paths ?? [];
   const canContinue = evidencePaths.length > 0;
+  const reference = REFERENCE_SCREENSHOTS[step.name];
 
   async function handleAddEvidence(path: string) {
     await onSave("completed", "", [...evidencePaths, path]);
@@ -55,6 +57,21 @@ export default function NetworkCheck({ step, report, onSave, onUpload, onViewEvi
               {report?.saved_at ? `Saved ${formatTime(report.saved_at)}` : "Not yet reported"}
             </div>
           </div>
+          {reference && (
+            <div className="flex items-start gap-3 bg-surface-2 border border-border rounded-[8px] p-3 mb-3">
+              <a href={reference.src} target="_blank" rel="noreferrer" className="shrink-0" title="Open full size">
+                <img
+                  src={reference.src}
+                  alt={`Example screenshot for ${step.name}`}
+                  className="w-24 h-16 object-cover rounded-[4px] border border-border"
+                />
+              </a>
+              <div className="text-[12px] text-text-2 leading-relaxed">
+                <div className="font-semibold text-text mb-0.5">Reference: what to capture</div>
+                {reference.caption}
+              </div>
+            </div>
+          )}
           <EvidenceList
             paths={evidencePaths}
             onAdd={handleAddEvidence}

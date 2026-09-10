@@ -2,6 +2,7 @@ import { useRef, useState, type ReactNode } from "react";
 import type { Outcome } from "../../types";
 import { FieldLabel, Textarea } from "../../components/ui";
 import EvidenceList from "../../components/EvidenceList";
+import { REFERENCE_SCREENSHOTS } from "../../lib/referenceScreenshots";
 import { OUTCOME_LABEL, OUTCOME_TEXT_COLOR, formatTime, toTimeInputValue, withTimeInputValue } from "../../lib/outcome";
 
 interface Props {
@@ -50,6 +51,7 @@ export default function StepRow({
   const commentRequired = outcome === "unable";
   const missingComment = commentRequired && !comment.trim();
   const missingEvidence = outcome !== null && evidencePaths.length === 0;
+  const reference = REFERENCE_SCREENSHOTS[name];
 
   // Several handlers below fire onSave in quick succession (e.g. blurring
   // the comment box the same moment a radio gets unchecked) -- without this,
@@ -202,6 +204,22 @@ export default function StepRow({
             : missingComment
               ? "Add a comment to finish this step."
               : "Attach evidence to finish this step."}
+        </div>
+      )}
+
+      {reference && (
+        <div className="flex items-start gap-3 bg-surface-2 border border-border rounded-[8px] p-3 mb-3">
+          <a href={reference.src} target="_blank" rel="noreferrer" className="shrink-0" title="Open full size">
+            <img
+              src={reference.src}
+              alt={`Example screenshot for ${name}`}
+              className="w-24 h-16 object-cover rounded-[4px] border border-border"
+            />
+          </a>
+          <div className="text-[12px] text-text-2 leading-relaxed">
+            <div className="font-semibold text-text mb-0.5">Reference: what to capture</div>
+            {reference.caption}
+          </div>
         </div>
       )}
 

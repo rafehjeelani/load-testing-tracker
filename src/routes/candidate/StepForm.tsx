@@ -373,7 +373,9 @@ export default function StepForm() {
             <p className="text-[12.5px] text-text-3 mb-4 leading-relaxed">
               Mark how this step actually went below. Your answers save automatically as you type —
               the timestamp is stamped the moment you pick an option. Evidence is required for every
-              step.
+              step — match the reference screenshot shown on each step where one's provided. If you hit
+              an error, a reconnecting screen, or an unusually long delay instead, don't upload it here —
+              log it under Disconnection with a screenshot of what you're seeing.
             </p>
 
             <StepRow

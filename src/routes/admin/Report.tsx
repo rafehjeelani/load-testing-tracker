@@ -143,7 +143,7 @@ export default function Report() {
   const startedForm = candidates.filter((c) => stepHistory.some((h) => h.candidate_email === c.email)).length;
   // Mutually exclusive with unableToComplete on purpose: a candidate who
   // finished every step but had "Completed with issues" on one of them
-  // belongs in Unable to Complete, not here -- otherwise the two tiles
+  // belongs in Completed With Issues, not here -- otherwise the two tiles
   // double-count that candidate and their sum can exceed the invited count.
   const completedAllSteps = candidates.filter((c) =>
     steps.every((s) => c.step_outcomes[s.id]?.outcome === "completed"),
@@ -230,7 +230,7 @@ export default function Report() {
       description: "Candidates who reported “Completed” (not “Completed with issues”) on every step in this test.",
     },
     {
-      label: "Unable to Complete",
+      label: "Completed With Issues",
       value: unableToComplete,
       color: "text-danger",
       description: "Candidates who reported “Completed with issues” on at least one step.",
