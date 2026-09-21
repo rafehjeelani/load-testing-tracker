@@ -3,6 +3,7 @@ import { sanitizeFilename } from "./storagePath";
 import type {
   CandidateFull,
   CandidateListItem,
+  DisconnectedStream,
   Issue,
   Moderator,
   Outcome,
@@ -468,7 +469,9 @@ export async function listIssuesForTest(
 ): Promise<(Issue & { candidate_email: string })[]> {
   const { data, error } = await supabase
     .from("issues")
-    .select("id, step_id, custom_step_name, comment, evidence_paths, created_at, candidates!inner(email, test_id)")
+    .select(
+      "id, step_id, custom_step_name, comment, evidence_paths, disconnected_streams, created_at, candidates!inner(email, test_id)",
+    )
     .eq("candidates.test_id", testId);
   if (error) throw new StaffApiError(error.message);
   return (data ?? []).map((row) => {
@@ -496,7 +499,7 @@ export async function getCandidateFull(candidateId: string): Promise<CandidateFu
 
   const { data: issues, error: iErr } = await supabase
     .from("issues")
-    .select("id, step_id, custom_step_name, comment, evidence_paths, created_at")
+    .select("id, step_id, custom_step_name, comment, evidence_paths, disconnected_streams, created_at")
     .eq("candidate_id", candidateId)
     .order("created_at");
   if (iErr) throw new StaffApiError(iErr.message);
@@ -565,6 +568,7 @@ export async function addIssueStaff(
   customStepName: string | null,
   comment: string,
   evidencePaths: string[],
+  disconnectedStreams: DisconnectedStream[],
 ) {
   const { error } = await supabase.from("issues").insert({
     candidate_id: candidateId,
@@ -572,6 +576,7 @@ export async function addIssueStaff(
     custom_step_name: customStepName,
     comment,
     evidence_paths: evidencePaths,
+    disconnected_streams: disconnectedStreams,
   });
   if (error) throw new StaffApiError(error.message);
 }

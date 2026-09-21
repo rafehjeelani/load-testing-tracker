@@ -12,7 +12,7 @@ import {
   upsertStepReportStaff,
   uploadEvidenceStaff,
 } from "../../lib/staffApi";
-import type { CandidateFull, Outcome, Step, StepReportHistoryEntry } from "../../types";
+import type { CandidateFull, DisconnectedStream, Outcome, Step, StepReportHistoryEntry } from "../../types";
 import { Badge, Button, ErrorState, LoadingState, PageHeader } from "../../components/ui";
 import { Logo } from "../../components/Logo";
 import IssuesSection, { type IssuesSectionHandle } from "../../components/IssuesSection";
@@ -120,8 +120,9 @@ export default function CandidateForm() {
     customStepName: string | null,
     comment: string,
     evidencePaths: string[],
+    disconnectedStreams: DisconnectedStream[],
   ) {
-    await addIssueStaff(candidateId!, stepId, customStepName, comment, evidencePaths);
+    await addIssueStaff(candidateId!, stepId, customStepName, comment, evidencePaths, disconnectedStreams);
     await load();
   }
 
@@ -237,6 +238,7 @@ export default function CandidateForm() {
               }
               onUpload={handleUpload}
               onEditSavedAt={(savedAtIso) => handleEditSavedAt(step.id, savedAtIso)}
+              onRequestDisconnection={() => issuesRef.current?.open()}
             />
           );
         })}

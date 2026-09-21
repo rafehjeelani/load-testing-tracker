@@ -2,8 +2,14 @@ import { useRef, useState, type ReactNode } from "react";
 import type { Outcome } from "../../types";
 import { FieldLabel, Textarea } from "../../components/ui";
 import EvidenceList from "../../components/EvidenceList";
+import EditReasonModal from "../../components/EditReasonModal";
 import { REFERENCE_SCREENSHOTS } from "../../lib/referenceScreenshots";
 import { OUTCOME_LABEL, OUTCOME_TEXT_COLOR, formatTime, toTimeInputValue, withTimeInputValue } from "../../lib/outcome";
+
+/** What's waiting on a reason (Disconnection vs. correction) before it's
+ *  actually applied -- set the moment an already-answered step's outcome or
+ *  timestamp would change, cleared once the reason modal resolves it. */
+type PendingChange = { type: "outcome"; value: Outcome } | { type: "uncheck" } | { type: "time"; iso: string };
 
 interface Props {
   name: string;
@@ -25,6 +31,10 @@ interface Props {
   onUpload: (file: File) => Promise<string>;
   onViewEvidence: (path: string) => Promise<string>;
   onEditSavedAt: (savedAtIso: string) => Promise<void>;
+  /** Opens the Disconnection form -- called when the candidate says a change
+   *  to an already-answered step is actually because of a disconnection,
+   *  instead of applying the change directly. */
+  onRequestDisconnection: () => void;
 }
 
 export default function StepRow({
@@ -41,6 +51,7 @@ export default function StepRow({
   onUpload,
   onViewEvidence,
   onEditSavedAt,
+  onRequestDisconnection,
 }: Props) {
   const [outcome, setOutcome] = useState<Outcome | null>(initialOutcome);
   const [comment, setComment] = useState(initialComment);
@@ -48,6 +59,7 @@ export default function StepRow({
   const [savedAt, setSavedAt] = useState<string | null>(initialSavedAt);
   const [editingTime, setEditingTime] = useState(false);
   const [editingTimeValue, setEditingTimeValue] = useState("");
+  const [pendingChange, setPendingChange] = useState<PendingChange | null>(null);
   const commentRequired = outcome === "unable";
   const missingComment = commentRequired && !comment.trim();
   const missingEvidence = outcome !== null && evidencePaths.length === 0;
@@ -66,27 +78,30 @@ export default function StepRow({
     return result;
   }
 
-  async function handleOutcomeChange(next: Outcome) {
+  async function applyOutcomeChange(next: Outcome | null) {
     setOutcome(next);
     const result = await enqueueSave(() => onSave(next, comment, evidencePaths));
     if (result) setSavedAt(result.saved_at ?? null);
   }
 
+  /** Picking a fresh outcome (nothing saved yet) applies right away -- the
+   *  reason prompt is only for *changing* an answer that's already there. */
+  function handleOutcomeChange(next: Outcome) {
+    if (outcome !== null && outcome !== next) {
+      setPendingChange({ type: "outcome", value: next });
+      return;
+    }
+    applyOutcomeChange(next);
+  }
+
   /** Re-clicking the already-selected radio un-selects it. Native radios
    *  can't be unchecked by clicking themselves again, so this is wired
    *  through onClick (which fires even without a checked-state change)
-   *  rather than onChange (which wouldn't fire at all here). */
-  async function handleUncheck() {
-    const hasOtherData = comment.trim().length > 0 || evidencePaths.length > 0;
-    const ok = window.confirm(
-      hasOtherData
-        ? "Clear your answer for this step? Your comment and evidence will be kept, along with the recorded time."
-        : "Clear your answer for this step? The recorded time will be cleared too, since nothing else is saved for this step.",
-    );
-    if (!ok) return;
-    setOutcome(null);
-    const result = await enqueueSave(() => onSave(null, comment, evidencePaths));
-    if (result) setSavedAt(result.saved_at ?? null);
+   *  rather than onChange (which wouldn't fire at all here). There's always
+   *  existing data to protect here (an outcome has to be checked already
+   *  for this to fire), so it always goes through the reason prompt. */
+  function handleUncheck() {
+    setPendingChange({ type: "uncheck" });
   }
 
   function startEditTime() {
@@ -94,11 +109,34 @@ export default function StepRow({
     setEditingTime(true);
   }
 
-  async function saveEditTime() {
+  /** Queues the edited timestamp behind the reason prompt instead of saving
+   *  it immediately -- same "disconnection vs. correction" gate as changing
+   *  the outcome, since backdating a saved time is just as much a change to
+   *  already-recorded data. */
+  function requestSaveEditTime() {
     const nextIso = withTimeInputValue(savedAt ?? new Date().toISOString(), editingTimeValue);
-    setSavedAt(nextIso);
+    setPendingChange({ type: "time", iso: nextIso });
+  }
+
+  async function applyEditTime(iso: string) {
+    setSavedAt(iso);
     setEditingTime(false);
-    await onEditSavedAt(nextIso);
+    await onEditSavedAt(iso);
+  }
+
+  function handleCorrection() {
+    const pending = pendingChange;
+    setPendingChange(null);
+    if (!pending) return;
+    if (pending.type === "outcome") applyOutcomeChange(pending.value);
+    else if (pending.type === "uncheck") applyOutcomeChange(null);
+    else applyEditTime(pending.iso);
+  }
+
+  function handleDisconnection() {
+    setPendingChange(null);
+    setEditingTime(false);
+    onRequestDisconnection();
   }
 
   async function handleCommentBlur() {
@@ -142,7 +180,7 @@ export default function StepRow({
                 onChange={(e) => setEditingTimeValue(e.target.value)}
                 className="px-2 py-1 border border-border rounded-[6px] bg-surface text-[12px] font-mono-tabular"
               />
-              <button type="button" onClick={saveEditTime} className="text-success cursor-pointer" title="Save time">
+              <button type="button" onClick={requestSaveEditTime} className="text-success cursor-pointer" title="Save time">
                 <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
                   <path d="M20 6L9 17l-5-5" />
                 </svg>
@@ -240,6 +278,13 @@ export default function StepRow({
         }}
         getPreviewUrl={onViewEvidence}
         required
+      />
+
+      <EditReasonModal
+        open={pendingChange !== null}
+        onClose={() => setPendingChange(null)}
+        onDisconnection={handleDisconnection}
+        onCorrection={handleCorrection}
       />
     </div>
   );

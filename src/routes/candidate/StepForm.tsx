@@ -16,7 +16,7 @@ import StepRow from "./StepRow";
 import StepPreview from "./StepPreview";
 import NetworkCheck from "./NetworkCheck";
 import IssuesSection, { type IssuesSectionHandle } from "../../components/IssuesSection";
-import type { Outcome, Step, StepReportHistoryEntry } from "../../types";
+import type { DisconnectedStream, Outcome, Step, StepReportHistoryEntry } from "../../types";
 
 type ViewMode = "wizard" | "preview";
 
@@ -153,8 +153,9 @@ export default function StepForm() {
     customStepName: string | null,
     comment: string,
     evidencePaths: string[],
+    disconnectedStreams: DisconnectedStream[],
   ) {
-    await addIssue(sessionTestSlug, email, stepId, customStepName, comment, evidencePaths);
+    await addIssue(sessionTestSlug, email, stepId, customStepName, comment, evidencePaths, disconnectedStreams);
     setSession({
       testSlug: sessionTestSlug,
       email,
@@ -168,6 +169,7 @@ export default function StepForm() {
             custom_step_name: customStepName,
             comment,
             evidence_paths: evidencePaths,
+            disconnected_streams: disconnectedStreams,
             created_at: new Date().toISOString(),
           },
         ],
@@ -415,6 +417,7 @@ export default function StepForm() {
               onUpload={handleUpload}
               onViewEvidence={handleViewEvidence}
               onEditSavedAt={(savedAtIso) => handleEditSavedAt(currentStep.id, savedAtIso)}
+              onRequestDisconnection={() => issuesRef.current?.open()}
             />
 
             <div className="flex items-center gap-2">

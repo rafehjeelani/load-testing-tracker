@@ -1,6 +1,6 @@
 import { supabase } from "./supabase";
 import { sanitizeFilename } from "./storagePath";
-import type { CandidateState, Outcome } from "../types";
+import type { CandidateState, DisconnectedStream, Outcome } from "../types";
 
 export class CandidateApiError extends Error {}
 
@@ -45,6 +45,7 @@ export function addIssue(
   customStepName: string | null,
   comment: string,
   evidencePaths: string[],
+  disconnectedStreams: DisconnectedStream[],
 ) {
   return callRpc<{ ok: true }>("rpc_add_issue", {
     p_test_slug: testSlug,
@@ -53,6 +54,7 @@ export function addIssue(
     p_custom_step_name: customStepName,
     p_comment: comment,
     p_evidence_paths: evidencePaths,
+    p_disconnected_streams: disconnectedStreams,
   });
 }
 

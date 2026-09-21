@@ -1,7 +1,10 @@
 import { useState } from "react";
-import type { Issue, Step, StepReportHistoryEntry } from "../types";
+import type { DisconnectedStream, Issue, Step, StepReportHistoryEntry } from "../types";
 import EvidenceRow from "./EvidenceRow";
+import { Badge } from "./ui";
 import { OUTCOME_LABEL, OUTCOME_TEXT_COLOR, formatTime } from "../lib/outcome";
+
+const STREAM_LABEL: Record<DisconnectedStream, string> = { primary: "Primary", screen: "Screen", secondary: "Secondary" };
 
 interface Props {
   steps: Step[];
@@ -22,7 +25,7 @@ type LogEntry =
       comment: string | null;
       evidencePaths: string[];
     }
-  | { kind: "disconnection"; time: number; comment: string; evidencePaths: string[] };
+  | { kind: "disconnection"; time: number; comment: string; evidencePaths: string[]; disconnectedStreams: DisconnectedStream[] };
 
 /** Chronological list of every step submission (across every attempt) and
  *  every disconnection, in the order they happened -- so a step answered,
@@ -55,6 +58,7 @@ export default function SessionLog({ steps, history, issues, onDownloadEvidence,
       time: new Date(i.created_at).getTime(),
       comment: i.comment,
       evidencePaths: i.evidence_paths,
+      disconnectedStreams: i.disconnected_streams,
     })),
   ].sort((a, b) => a.time - b.time);
 
@@ -104,6 +108,15 @@ export default function SessionLog({ steps, history, issues, onDownloadEvidence,
             </button>
             {expandedIndex === i && (
               <div className="ml-4 mt-1.5 mb-1 pl-3 border-l-2 border-border-soft flex flex-col gap-1.5">
+                {entry.kind === "disconnection" && entry.disconnectedStreams.length > 0 && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {entry.disconnectedStreams.map((s) => (
+                      <Badge key={s} variant="neutral">
+                        {STREAM_LABEL[s]}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
                 {entry.comment && <div className="text-[12.5px] text-text-2">{entry.comment}</div>}
                 {entry.evidencePaths.length > 0 ? (
                   <div className="flex flex-col gap-1">

@@ -1,5 +1,9 @@
 export type Outcome = "completed" | "unable";
 export type StaffRole = "admin" | "moderator";
+/** Which recording stream(s) a logged disconnection affected -- drives the
+ *  per-stream duration math on the Report page (a disconnection only cuts
+ *  downtime from the streams it actually affected, not all three). */
+export type DisconnectedStream = "primary" | "screen" | "secondary";
 
 export const MAX_EVIDENCE_FILES = 5;
 export const MAX_EVIDENCE_FILE_SIZE_MB = 10;
@@ -55,6 +59,7 @@ export interface Issue {
   custom_step_name: string | null;
   comment: string;
   evidence_paths: string[];
+  disconnected_streams: DisconnectedStream[];
   created_at: string;
 }
 

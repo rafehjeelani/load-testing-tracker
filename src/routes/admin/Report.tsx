@@ -166,10 +166,8 @@ export default function Report() {
   const candidateDurations = candidates
     .map((c) => {
       const ownHistory = stepHistory.filter((h) => h.candidate_email === c.email);
-      const disconnectionTimes = issues
-        .filter((i) => i.candidate_email === c.email)
-        .map((i) => new Date(i.created_at).getTime())
-        .sort((a, b) => a - b);
+      const ownIssues = issues.filter((i) => i.candidate_email === c.email);
+      const disconnectionTimes = ownIssues.map((i) => new Date(i.created_at).getTime()).sort((a, b) => a - b);
 
       function timesForStepName(name: string): number[] {
         const step = steps.find((s) => s.name === name);
@@ -193,7 +191,16 @@ export default function Report() {
 
       const durations = DURATION_METRICS.map((m) => {
         const anchorTimes = timesForStepName(m.anchorStepName);
-        const { seconds, note } = computeDurationSeconds(anchorTimes, disconnectionTimes, endTime);
+        // An issue logged without any streams recorded (every one from
+        // before per-stream tracking existed) is treated as affecting every
+        // stream, matching the old uniform behavior -- only a disconnection
+        // that names specific streams narrows which metrics its downtime
+        // gets excluded from.
+        const streamDisconnectionTimes = ownIssues
+          .filter((i) => i.disconnected_streams.length === 0 || i.disconnected_streams.includes(m.key))
+          .map((i) => new Date(i.created_at).getTime())
+          .sort((a, b) => a - b);
+        const { seconds, note } = computeDurationSeconds(anchorTimes, streamDisconnectionTimes, endTime);
         const fullNote =
           endIsFallback && seconds !== null
             ? note === "clean"

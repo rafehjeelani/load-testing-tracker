@@ -302,10 +302,11 @@ export default function Candidates() {
 
     if (exportOpts.comments) {
       const issues = await listIssuesForTest(testId!);
-      const headers = ["Candidate", "Step", "Comment", "Evidence Path", "Logged At"];
+      const headers = ["Candidate", "Step", "Disconnected Streams", "Comment", "Evidence Path", "Logged At"];
       const rows = issues.map((i) => [
         i.candidate_email,
         i.custom_step_name ?? steps.find((s) => s.id === i.step_id)?.name ?? "",
+        i.disconnected_streams.join("; "),
         i.comment,
         i.evidence_paths.join("; "),
         i.created_at,

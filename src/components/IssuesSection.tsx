@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
-import type { Issue, Step } from "../types";
+import type { DisconnectedStream, Issue, Step } from "../types";
 import { Badge, Button, FieldLabel, Modal, Textarea } from "./ui";
 import EvidenceList from "./EvidenceList";
 import { formatTime, toTimeInputValue, withTimeInputValue } from "../lib/outcome";
@@ -10,6 +10,13 @@ function isImagePath(path: string) {
   return !!ext && IMAGE_EXTENSIONS.has(ext);
 }
 
+const STREAM_OPTIONS: { key: DisconnectedStream; label: string }[] = [
+  { key: "primary", label: "Primary disconnected" },
+  { key: "screen", label: "Screen disconnected" },
+  { key: "secondary", label: "Secondary disconnected" },
+];
+const STREAM_LABEL: Record<DisconnectedStream, string> = { primary: "Primary", screen: "Screen", secondary: "Secondary" };
+
 interface Props {
   steps: Step[];
   issues: Issue[];
@@ -18,6 +25,7 @@ interface Props {
     customStepName: string | null,
     comment: string,
     evidencePaths: string[],
+    disconnectedStreams: DisconnectedStream[],
   ) => Promise<void>;
   onUpload: (file: File) => Promise<string>;
   /** When provided, a "Download" action is shown next to each logged issue's evidence, via a signed URL. */
@@ -44,6 +52,7 @@ const IssuesSection = forwardRef<IssuesSectionHandle, Props>(function IssuesSect
   const [formOpen, setFormOpen] = useState(false);
   const [comment, setComment] = useState("");
   const [evidencePaths, setEvidencePaths] = useState<string[]>([]);
+  const [disconnectedStreams, setDisconnectedStreams] = useState<DisconnectedStream[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [downloadingPath, setDownloadingPath] = useState<string | null>(null);
   const [editingTimeId, setEditingTimeId] = useState<string | null>(null);
@@ -72,11 +81,13 @@ const IssuesSection = forwardRef<IssuesSectionHandle, Props>(function IssuesSect
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [issues, getPreviewUrl]);
 
-  const canSubmit = comment.trim().length > 0 && evidencePaths.length > 0 && !submitting;
+  const canSubmit =
+    comment.trim().length > 0 && evidencePaths.length > 0 && disconnectedStreams.length > 0 && !submitting;
 
   function resetForm() {
     setComment("");
     setEvidencePaths([]);
+    setDisconnectedStreams([]);
   }
 
   function closeForm() {
@@ -84,11 +95,15 @@ const IssuesSection = forwardRef<IssuesSectionHandle, Props>(function IssuesSect
     setFormOpen(false);
   }
 
+  function toggleStream(key: DisconnectedStream) {
+    setDisconnectedStreams((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  }
+
   async function handleSubmit() {
     if (!canSubmit) return;
     setSubmitting(true);
     try {
-      await onAdd(null, null, comment.trim(), evidencePaths);
+      await onAdd(null, null, comment.trim(), evidencePaths, disconnectedStreams);
       closeForm();
     } finally {
       setSubmitting(false);
@@ -191,6 +206,15 @@ const IssuesSection = forwardRef<IssuesSectionHandle, Props>(function IssuesSect
               </span>
             )}
           </div>
+          {issue.disconnected_streams.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap mb-2">
+              {issue.disconnected_streams.map((s) => (
+                <Badge key={s} variant="neutral">
+                  {STREAM_LABEL[s]}
+                </Badge>
+              ))}
+            </div>
+          )}
           <div className="text-[13px] mb-2">{issue.comment}</div>
           <div className="flex flex-col gap-1">
             {issue.evidence_paths.map((path) => (
@@ -237,6 +261,21 @@ const IssuesSection = forwardRef<IssuesSectionHandle, Props>(function IssuesSect
 
       <Modal open={formOpen} onClose={closeForm} title="Report an Issue">
         <div className="flex flex-col gap-3">
+          <div>
+            <FieldLabel required>What disconnected?</FieldLabel>
+            <div className="flex flex-col gap-1.5 mt-1">
+              {STREAM_OPTIONS.map((opt) => (
+                <label key={opt.key} className="flex items-center gap-2 text-[13px] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={disconnectedStreams.includes(opt.key)}
+                    onChange={() => toggleStream(opt.key)}
+                  />
+                  {opt.label}
+                </label>
+              ))}
+            </div>
+          </div>
           <div>
             <FieldLabel required>Comment</FieldLabel>
             <Textarea
