@@ -5,6 +5,7 @@ import {
   getCandidateFull,
   getCandidateStepHistory,
   getEvidenceDownloadUrl,
+  getNetworkCheckStep,
   listSteps,
   submitFormStaff,
   updateIssueTimestamp,
@@ -16,7 +17,7 @@ import type { CandidateFull, DisconnectedStream, Outcome, Step, StepReportHistor
 import { Badge, Button, ErrorState, LoadingState, PageHeader } from "../../components/ui";
 import { Logo } from "../../components/Logo";
 import IssuesSection, { type IssuesSectionHandle } from "../../components/IssuesSection";
-import SessionLog from "../../components/SessionLog";
+import SessionLog, { type LogEditTarget } from "../../components/SessionLog";
 import StaffStepRow from "./StaffStepRow";
 import { useAuth } from "./AuthContext";
 import { useAsyncLoad } from "../../lib/useAsyncLoad";
@@ -38,6 +39,7 @@ export default function CandidateForm() {
   const { profile } = useAuth();
   const homePath = profile ? `/${profile.role}` : "/";
   const [steps, setSteps] = useState<Step[] | null>(null);
+  const [networkCheckStep, setNetworkCheckStep] = useState<Step | null>(null);
   const [full, setFull] = useState<CandidateFull | null>(null);
   const [history, setHistory] = useState<StepReportHistoryEntry[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -47,10 +49,15 @@ export default function CandidateForm() {
   async function load() {
     if (!candidateId) return;
     const f = await getCandidateFull(candidateId);
-    const [s, h] = await Promise.all([listSteps(f.candidate.test_id), getCandidateStepHistory(candidateId)]);
+    const [s, h, nc] = await Promise.all([
+      listSteps(f.candidate.test_id),
+      getCandidateStepHistory(candidateId),
+      getNetworkCheckStep(f.candidate.test_id),
+    ]);
     setFull(f);
     setSteps(s);
     setHistory(h);
+    setNetworkCheckStep(nc);
   }
 
   const { status, error, slow, retry } = useAsyncLoad(load, [candidateId]);
@@ -61,6 +68,11 @@ export default function CandidateForm() {
 
   const reportByStep = new Map(full.step_reports.map((r) => [r.step_id, r]));
   const sortedSteps = [...steps].sort((a, b) => a.order_index - b.order_index);
+  // Session Log is the one place that shows the network check alongside the
+  // ordinary steps -- it has no editable card of its own above (it's a
+  // fixed, non-admin-configurable gate), just a visible, correctable entry
+  // in the log.
+  const sessionLogSteps = networkCheckStep ? [networkCheckStep, ...sortedSteps] : sortedSteps;
 
   async function handleSave(
     stepId: string,
@@ -128,6 +140,18 @@ export default function CandidateForm() {
 
   async function handleEditIssueTime(issueId: string, createdAtIso: string) {
     await updateIssueTimestamp(issueId, createdAtIso);
+    await load();
+  }
+
+  /** Session Log spans every attempt, not just the current one -- unlike
+   *  StaffStepRow's onEditSavedAt (always the current attempt), this targets
+   *  whichever attempt the clicked entry actually came from. */
+  async function handleSessionLogEditTime(target: LogEditTarget, newIso: string) {
+    if (target.kind === "step") {
+      await updateStepReportSavedAt(candidateId!, target.stepId, target.attempt, newIso);
+    } else {
+      await updateIssueTimestamp(target.issueId, newIso);
+    }
     await load();
   }
 
@@ -244,11 +268,12 @@ export default function CandidateForm() {
         })}
 
         <SessionLog
-          steps={sortedSteps}
+          steps={sessionLogSteps}
           history={history}
           issues={full.issues}
           onDownloadEvidence={handleDownload}
           getPreviewUrl={getEvidenceDownloadUrl}
+          onEditTime={handleSessionLogEditTime}
         />
 
         <IssuesSection
