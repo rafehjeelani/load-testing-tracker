@@ -172,6 +172,20 @@ export function listSteps(testId: string): Promise<Step[]> {
   );
 }
 
+/** The fixed network-check step every test has -- kept separate from
+ *  listSteps() (which every ordinary step listing uses) so it only shows up
+ *  where it's explicitly asked for, like the Report page's Session Timeline. */
+export async function getNetworkCheckStep(testId: string): Promise<Step | null> {
+  const { data, error } = await supabase
+    .from("steps")
+    .select("id, name, order_index, required, is_network_check")
+    .eq("test_id", testId)
+    .eq("is_network_check", true)
+    .maybeSingle();
+  if (error) throw new StaffApiError(error.message);
+  return data;
+}
+
 export async function addStep(testId: string, name: string, orderIndex: number, required = true) {
   const { error } = await supabase
     .from("steps")

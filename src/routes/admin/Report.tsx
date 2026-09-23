@@ -1,16 +1,20 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import {
+  getNetworkCheckStep,
   getTest,
   listCandidates,
   listIssuesForTest,
   listModerators,
   listStepReportHistoryForTest,
   listSteps,
+  StaffApiError,
+  updateIssueTimestamp,
+  updateStepReportSavedAt,
 } from "../../lib/staffApi";
 import type { CandidateListItem, Issue, Moderator, Step, StepReportHistoryRow, Test } from "../../types";
-import { formatTime } from "../../lib/outcome";
-import { ErrorState, LoadingState, PageHeader, RefreshButton } from "../../components/ui";
+import { formatTime, toTimeInputValue, withTimeInputValue } from "../../lib/outcome";
+import { Button, ErrorState, LoadingState, Modal, PageHeader, RefreshButton } from "../../components/ui";
 import { TopNav } from "../staff/TopNav";
 import { useAsyncLoad } from "../../lib/useAsyncLoad";
 
@@ -19,12 +23,13 @@ const OUTCOME_DOT_COLOR: Record<string, string> = {
   unable: "var(--danger)",
 };
 
-interface TimelineEvent {
-  time: number;
-  kind: "step" | "issue";
-  label: string;
-  outcome?: string;
-}
+// Each event carries exactly what's needed to correct its timestamp from
+// the chart: a step event names the step_reports row it came from
+// (candidate/step/attempt, since a step can have one row per attempt), an
+// issue event just its own id.
+type TimelineEvent =
+  | { time: number; kind: "step"; label: string; outcome?: string; candidateId: string; stepId: string; attempt: number }
+  | { time: number; kind: "issue"; label: string; issueId: string };
 
 // Session-duration metrics: each is measured from the named anchor step to
 // the "Session Completed" step (or, failing that, the last recorded event
@@ -95,18 +100,24 @@ export default function Report() {
   const [moderators, setModerators] = useState<Moderator[]>([]);
   const [issues, setIssues] = useState<(Issue & { candidate_email: string })[]>([]);
   const [history, setHistory] = useState<StepReportHistoryRow[]>([]);
+  const [networkCheckStep, setNetworkCheckStep] = useState<Step | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [hiddenStepIds, setHiddenStepIds] = useState<Set<string>>(new Set());
+  const [editingEvent, setEditingEvent] = useState<{ email: string; event: TimelineEvent } | null>(null);
+  const [editingTimeValue, setEditingTimeValue] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   async function load() {
     if (!testId) return;
-    const [t, s, c, m, iss, hist] = await Promise.all([
+    const [t, s, c, m, iss, hist, nc] = await Promise.all([
       getTest(testId),
       listSteps(testId),
       listCandidates(testId),
       listModerators(),
       listIssuesForTest(testId),
       listStepReportHistoryForTest(testId),
+      getNetworkCheckStep(testId),
     ]);
     setTest(t);
     setSteps([...s].sort((a, b) => a.order_index - b.order_index));
@@ -114,6 +125,7 @@ export default function Report() {
     setModerators(m);
     setIssues(iss);
     setHistory(hist);
+    setNetworkCheckStep(nc);
   }
 
   const { status, error, slow, retry } = useAsyncLoad(load, [testId]);
@@ -124,6 +136,33 @@ export default function Report() {
       await load();
     } finally {
       setRefreshing(false);
+    }
+  }
+
+  function openEditTime(email: string, event: TimelineEvent) {
+    setEditingEvent({ email, event });
+    setEditingTimeValue(toTimeInputValue(new Date(event.time).toISOString()));
+    setEditError(null);
+  }
+
+  async function handleSaveEditTime() {
+    if (!editingEvent) return;
+    const { event } = editingEvent;
+    const nextIso = withTimeInputValue(new Date(event.time).toISOString(), editingTimeValue);
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      if (event.kind === "step") {
+        await updateStepReportSavedAt(event.candidateId, event.stepId, event.attempt, nextIso);
+      } else {
+        await updateIssueTimestamp(event.issueId, nextIso);
+      }
+      await load();
+      setEditingEvent(null);
+    } catch (err) {
+      setEditError(err instanceof StaffApiError ? err.message : "Couldn't save that time.");
+    } finally {
+      setEditSaving(false);
     }
   }
 
@@ -284,6 +323,14 @@ export default function Report() {
     return { step: s, attempted, successful, unable, unableRate };
   });
 
+  const emailToCandidateId = new Map(candidates.map((c) => [c.email, c.id]));
+
+  // The Session Timeline is the one place that shows the network check
+  // alongside the ordinary steps -- everywhere else (funnel, step-level
+  // performance, durations) deliberately excludes it, so it's kept out of
+  // `steps` itself and only merged in here.
+  const timelineSteps = networkCheckStep ? [networkCheckStep, ...steps] : steps;
+
   // Built from the full step_reports history (every attempt, not just each
   // candidate's current one) so a disconnection's new attempt shows up as a
   // second dot for that step instead of overwriting the first -- that's the
@@ -292,24 +339,33 @@ export default function Report() {
   for (const r of history) {
     if (!r.saved_at) continue;
     if (hiddenStepIds.has(r.step_id)) continue;
-    const stepName = steps.find((s) => s.id === r.step_id)?.name;
-    if (!stepName) continue;
+    const stepName = timelineSteps.find((s) => s.id === r.step_id)?.name;
+    const candidateId = emailToCandidateId.get(r.candidate_email);
+    if (!stepName || !candidateId) continue;
     const events = eventsByEmail.get(r.candidate_email) ?? [];
-    events.push({ time: new Date(r.saved_at).getTime(), kind: "step", label: stepName, outcome: r.outcome ?? undefined });
+    events.push({
+      time: new Date(r.saved_at).getTime(),
+      kind: "step",
+      label: stepName,
+      outcome: r.outcome ?? undefined,
+      candidateId,
+      stepId: r.step_id,
+      attempt: r.attempt,
+    });
     eventsByEmail.set(r.candidate_email, events);
   }
   for (const iss of issues) {
     if (iss.step_id && hiddenStepIds.has(iss.step_id)) continue;
-    const stepName = iss.custom_step_name ?? steps.find((s) => s.id === iss.step_id)?.name ?? "Issue";
+    const stepName = iss.custom_step_name ?? timelineSteps.find((s) => s.id === iss.step_id)?.name ?? "Issue";
     const events = eventsByEmail.get(iss.candidate_email) ?? [];
-    events.push({ time: new Date(iss.created_at).getTime(), kind: "issue", label: stepName });
+    events.push({ time: new Date(iss.created_at).getTime(), kind: "issue", label: stepName, issueId: iss.id });
     eventsByEmail.set(iss.candidate_email, events);
   }
   const timelineRows = [...eventsByEmail.entries()]
     .map(([email, events]) => ({ email, events: [...events].sort((a, b) => a.time - b.time) }))
     .filter((row) => row.events.length > 0)
     .sort((a, b) => a.email.localeCompare(b.email));
-  const allStepsHidden = steps.length > 0 && hiddenStepIds.size === steps.length;
+  const allStepsHidden = timelineSteps.length > 0 && hiddenStepIds.size === timelineSteps.length;
 
   const allTimes = timelineRows.flatMap((r) => r.events.map((e) => e.time));
   const minTime = allTimes.length ? Math.min(...allTimes) : 0;
@@ -590,11 +646,11 @@ export default function Report() {
         <div className="text-[12.5px] text-text-3 mb-3">
           Every step save and logged issue, plotted against real time per candidate.
         </div>
-        {steps.length > 0 && (
+        {timelineSteps.length > 0 && (
           <div className="flex items-start gap-x-4 gap-y-2 flex-wrap mb-3 text-[12.5px]">
             <span className="text-text-3 font-semibold shrink-0 pt-0.5">Steps:</span>
             <div className="flex items-center gap-x-4 gap-y-2 flex-wrap flex-1">
-              {steps.map((s) => (
+              {timelineSteps.map((s) => (
                 <label key={s.id} className="flex items-center gap-1.5 cursor-pointer">
                   <input
                     type="checkbox"
@@ -618,7 +674,7 @@ export default function Report() {
               </button>
               <button
                 type="button"
-                onClick={() => setHiddenStepIds(new Set(steps.map((s) => s.id)))}
+                onClick={() => setHiddenStepIds(new Set(timelineSteps.map((s) => s.id)))}
                 className="text-text-3 hover:text-danger cursor-pointer"
               >
                 Clear all
@@ -679,9 +735,12 @@ export default function Report() {
                               height={8}
                               transform={`rotate(45 ${xForTime(e.time)} ${y})`}
                               fill="var(--danger)"
+                              style={{ cursor: "pointer" }}
+                              onClick={() => openEditTime(row.email, e)}
                             >
                               <title>
-                                {row.email} · Issue during {e.label} · {formatTime(new Date(e.time).toISOString())}
+                                {row.email} · Issue during {e.label} · {formatTime(new Date(e.time).toISOString())} ·
+                                click to edit time
                               </title>
                             </rect>
                           ) : (
@@ -691,9 +750,12 @@ export default function Report() {
                               cy={y}
                               r={4.5}
                               fill={OUTCOME_DOT_COLOR[e.outcome ?? ""] ?? "var(--text-3)"}
+                              style={{ cursor: "pointer" }}
+                              onClick={() => openEditTime(row.email, e)}
                             >
                               <title>
-                                {e.label} · {row.email} · {formatTime(new Date(e.time).toISOString())}
+                                {e.label} · {row.email} · {formatTime(new Date(e.time).toISOString())} · click to
+                                edit time
                               </title>
                             </circle>
                           ),
@@ -719,10 +781,37 @@ export default function Report() {
                   />
                   Issue / disconnection logged
                 </span>
+                <span className="text-text-3">Click a point to correct its time.</span>
               </div>
             </>
           )}
         </div>
+
+        <Modal open={editingEvent !== null} onClose={() => setEditingEvent(null)} title="Edit time">
+          {editingEvent && (
+            <div className="flex flex-col gap-3">
+              <p className="text-[13px] text-text-2 leading-relaxed">
+                {editingEvent.event.label} · <span className="font-semibold text-text">{editingEvent.email}</span>
+              </p>
+              <input
+                type="time"
+                autoFocus
+                value={editingTimeValue}
+                onChange={(e) => setEditingTimeValue(e.target.value)}
+                className="px-3 py-2 border border-border rounded-[7px] bg-surface text-[14px] font-mono-tabular w-40"
+              />
+              {editError && <div className="text-[12.5px] text-danger">{editError}</div>}
+              <div className="flex items-center gap-2">
+                <Button onClick={handleSaveEditTime} disabled={editSaving}>
+                  {editSaving ? "Saving…" : "Save"}
+                </Button>
+                <Button variant="ghost" onClick={() => setEditingEvent(null)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
+        </Modal>
 
         <div className="mb-3 font-bold text-[15px]">Step-Level Performance</div>
         <div className="bg-surface border border-border rounded-[10px] overflow-x-auto mb-8">
