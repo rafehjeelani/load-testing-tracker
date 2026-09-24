@@ -22,6 +22,10 @@ interface Props {
   /** When provided, staff can correct an entry's time -- omitted on the
    *  candidate's own Preview, which stays read-only here. */
   onEditTime?: (target: LogEditTarget, newIso: string) => Promise<void>;
+  /** When provided, staff can delete a disconnection entry (steps can't be
+   *  deleted this way -- only disconnections). Omitted on the candidate's
+   *  own Preview. */
+  onDelete?: (issueId: string) => Promise<void>;
 }
 
 type LogEntry =
@@ -58,11 +62,12 @@ function editTargetFor(entry: LogEntry): LogEditTarget {
  *  attempt or that specific disconnection. Shared by the candidate's own
  *  Preview and the staff (admin/moderator) candidate-editing view, so both
  *  see the same history. */
-export default function SessionLog({ steps, history, issues, onDownloadEvidence, getPreviewUrl, onEditTime }: Props) {
+export default function SessionLog({ steps, history, issues, onDownloadEvidence, getPreviewUrl, onEditTime, onDelete }: Props) {
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingTimeValue, setEditingTimeValue] = useState("");
   const [editSaving, setEditSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const logEntries: LogEntry[] = [
     ...history
@@ -105,6 +110,18 @@ export default function SessionLog({ steps, history, issues, onDownloadEvidence,
       setEditingIndex(null);
     } finally {
       setEditSaving(false);
+    }
+  }
+
+  async function handleDeleteDisconnection(issueId: string) {
+    if (!onDelete) return;
+    const ok = window.confirm("Delete this disconnection? This can't be undone.");
+    if (!ok) return;
+    setDeletingId(issueId);
+    try {
+      await onDelete(issueId);
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -180,6 +197,21 @@ export default function SessionLog({ steps, history, issues, onDownloadEvidence,
                       <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                         <path d="M12 20h9" />
                         <path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
+                      </svg>
+                    </button>
+                  )}
+                  {onDelete && entry.kind === "disconnection" && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteDisconnection(entry.issueId)}
+                      disabled={deletingId === entry.issueId}
+                      className="text-text-3 hover:text-danger cursor-pointer disabled:opacity-50"
+                      title="Delete disconnection"
+                    >
+                      <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <path d="M3 6h18" />
+                        <path d="M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2m2 0v14a1 1 0 01-1 1H7a1 1 0 01-1-1V6" />
+                        <path d="M10 11v6M14 11v6" />
                       </svg>
                     </button>
                   )}

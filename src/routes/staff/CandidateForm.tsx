@@ -140,11 +140,6 @@ export default function CandidateForm() {
     await load();
   }
 
-  async function handleEditIssueTime(issueId: string, createdAtIso: string) {
-    await updateIssueTimestamp(issueId, createdAtIso);
-    await load();
-  }
-
   async function handleDeleteIssue(issueId: string) {
     await deleteIssue(issueId);
     await load();
@@ -281,18 +276,25 @@ export default function CandidateForm() {
           onDownloadEvidence={handleDownload}
           getPreviewUrl={getEvidenceDownloadUrl}
           onEditTime={handleSessionLogEditTime}
+          onDelete={handleDeleteIssue}
         />
 
+        {/* The list of already-logged issues is hidden here -- the Session
+            Log above already shows every disconnection chronologically,
+            with the same edit-time and delete capability, so showing both
+            was just the same entries twice. This still renders the "Add
+            Issue / Disconnection" modal (opened via issuesRef from the
+            button up top) -- onDelete has to stay passed even with the
+            list hidden, since its truthiness is also what turns on the
+            modal's staff-only "When did this happen?" backdating field. */}
         <IssuesSection
           ref={issuesRef}
           steps={sortedSteps}
           issues={full.issues}
           onAdd={handleAddIssue}
           onUpload={handleUpload}
-          onDownload={handleDownload}
-          getPreviewUrl={getEvidenceDownloadUrl}
-          onEditTime={handleEditIssueTime}
           onDelete={handleDeleteIssue}
+          hideList
         />
 
         <div className="text-[12px] text-text-3 text-center mt-2">
