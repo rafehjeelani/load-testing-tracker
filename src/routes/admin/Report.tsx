@@ -67,6 +67,13 @@ function computeDurationSeconds(
       if (dBetween !== undefined) {
         total += (dBetween - a) / 1000;
       } else {
+        // No disconnection recorded in this window -- count the whole span
+        // as active instead of silently dropping it. This used to add
+        // nothing here at all, so a re-answer with no matching
+        // disconnection (its own logged time edited or deleted, or just a
+        // second attempt with no disconnection row) quietly erased that
+        // entire segment from the total.
+        total += (nextAnchor - a) / 1000;
         notes.push("re-answered without a disconnection logged in between");
       }
     } else {
@@ -179,7 +186,8 @@ export default function Report() {
   const stepHistory = history.filter((h) => h.saved_at && steps.some((s) => s.id === h.step_id));
 
   const invited = candidates.length;
-  const startedForm = candidates.filter((c) => stepHistory.some((h) => h.candidate_email === c.email)).length;
+  const startedCandidates = candidates.filter((c) => stepHistory.some((h) => h.candidate_email === c.email));
+  const startedForm = startedCandidates.length;
   // Mutually exclusive with unableToComplete on purpose: a candidate who
   // finished every step but had "Completed with issues" on one of them
   // belongs in Completed With Issues, not here -- otherwise the two tiles
@@ -194,7 +202,11 @@ export default function Report() {
   const stepsSubmitted = stepHistory.length;
   const disconnectionsLogged = issues.length;
 
-  const candidateActivity = candidates
+  // Both tables below are scoped to candidates who've actually started --
+  // someone who hasn't touched the form yet has nothing to show in either
+  // (0 steps/0 disconnections, or every duration blank), so they'd just be
+  // dead rows; "Invited" up in the summary tiles is still the full count.
+  const candidateActivity = startedCandidates
     .map((c) => ({
       email: c.email,
       stepsFilled: stepHistory.filter((h) => h.candidate_email === c.email).length,
@@ -202,7 +214,7 @@ export default function Report() {
     }))
     .sort((a, b) => a.email.localeCompare(b.email));
 
-  const candidateDurations = candidates
+  const candidateDurations = startedCandidates
     .map((c) => {
       const ownHistory = stepHistory.filter((h) => h.candidate_email === c.email);
       const ownIssues = issues.filter((i) => i.candidate_email === c.email);
@@ -520,7 +532,7 @@ export default function Report() {
               {candidateActivity.length === 0 && (
                 <tr>
                   <td colSpan={3} className="px-4 py-6 text-center text-text-3">
-                    No candidates on this test yet.
+                    {candidates.length === 0 ? "No candidates on this test yet." : "No candidates have started the form yet."}
                   </td>
                 </tr>
               )}
@@ -581,7 +593,7 @@ export default function Report() {
               {candidateDurations.length === 0 && (
                 <tr>
                   <td colSpan={1 + DURATION_METRICS.length} className="px-4 py-6 text-center text-text-3">
-                    No candidates on this test yet.
+                    {candidates.length === 0 ? "No candidates on this test yet." : "No candidates have started the form yet."}
                   </td>
                 </tr>
               )}
