@@ -211,6 +211,7 @@ export default function Report() {
       email: c.email,
       stepsFilled: stepHistory.filter((h) => h.candidate_email === c.email).length,
       disconnections: issues.filter((i) => i.candidate_email === c.email).length,
+      submitted: c.submitted,
     }))
     .sort((a, b) => a.email.localeCompare(b.email));
 
@@ -537,8 +538,16 @@ export default function Report() {
                 </tr>
               )}
               {candidateActivity.map((c) => (
-                <tr key={c.email} className="border-b border-border-soft last:border-0">
-                  <td className="px-4 py-2.5 font-semibold">{c.email}</td>
+                <tr
+                  key={c.email}
+                  className={`border-b border-border-soft last:border-0 ${!c.submitted ? "bg-danger-soft" : ""}`}
+                >
+                  <td
+                    className={`px-4 py-2.5 font-semibold ${!c.submitted ? "text-danger" : ""}`}
+                    title={!c.submitted ? "Hasn't submitted the form yet" : undefined}
+                  >
+                    {c.email}
+                  </td>
                   <td className="px-4 py-2.5 text-center font-mono-tabular">{c.stepsFilled}</td>
                   <td
                     className={`px-4 py-2.5 text-center font-mono-tabular ${

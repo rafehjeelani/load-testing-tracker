@@ -7,6 +7,18 @@ import { OUTCOME_LABEL, OUTCOME_TEXT_COLOR, formatTime, toTimeInputValue, withTi
 const STREAM_LABEL: Record<DisconnectedStream, string> = { primary: "Primary", screen: "Screen", secondary: "Secondary" };
 const STREAM_OPTIONS: DisconnectedStream[] = ["primary", "screen", "secondary"];
 
+// formatTime() only ever shows hour:minute -- fine for a single-day session,
+// but a log spanning multiple days (e.g. a candidate who disconnected and
+// came back the next morning) reads as scrambled without the date, even
+// though it's genuinely sorted correctly. A separator row makes day
+// boundaries visible instead of relying on the reader to notice.
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+}
+function dateKey(timeMs: number): string {
+  return new Date(timeMs).toDateString();
+}
+
 /** What to correct and how, passed back through onEditTime -- a step entry
  *  names the exact attempt it came from (a step can have more than one row
  *  after a disconnection), an issue entry just its own id. */
@@ -23,10 +35,10 @@ interface Props {
   /** When provided, staff can correct an entry's time -- omitted on the
    *  candidate's own Preview, which stays read-only here. */
   onEditTime?: (target: LogEditTarget, newIso: string) => Promise<void>;
-  /** When provided, staff can delete a disconnection entry (steps can't be
-   *  deleted this way -- only disconnections). Omitted on the candidate's
-   *  own Preview. */
-  onDelete?: (issueId: string) => Promise<void>;
+  /** When provided, staff can delete an entry -- a step entry removes that
+   *  attempt's outcome/comment/evidence entirely, an issue entry removes
+   *  the disconnection. Omitted on the candidate's own Preview. */
+  onDelete?: (target: LogEditTarget) => Promise<void>;
   /** When provided, staff can correct which stream(s) a disconnection
    *  affected -- omitted on the candidate's own Preview. */
   onEditStreams?: (issueId: string, streams: DisconnectedStream[]) => Promise<void>;
@@ -80,7 +92,7 @@ export default function SessionLog({
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingTimeValue, setEditingTimeValue] = useState("");
   const [editSaving, setEditSaving] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deletingIndex, setDeletingIndex] = useState<number | null>(null);
   const [editingStreamsId, setEditingStreamsId] = useState<string | null>(null);
   const [editingStreamsValue, setEditingStreamsValue] = useState<DisconnectedStream[]>([]);
   const [streamsSaving, setStreamsSaving] = useState(false);
@@ -129,15 +141,19 @@ export default function SessionLog({
     }
   }
 
-  async function handleDeleteDisconnection(issueId: string) {
+  async function handleDelete(i: number, entry: LogEntry) {
     if (!onDelete) return;
-    const ok = window.confirm("Delete this disconnection? This can't be undone.");
+    const ok = window.confirm(
+      entry.kind === "step"
+        ? "Delete this step entry? This removes its outcome, comment, and evidence for this attempt. This can't be undone."
+        : "Delete this disconnection? This can't be undone.",
+    );
     if (!ok) return;
-    setDeletingId(issueId);
+    setDeletingIndex(i);
     try {
-      await onDelete(issueId);
+      await onDelete(editTargetFor(entry));
     } finally {
-      setDeletingId(null);
+      setDeletingIndex(null);
     }
   }
 
@@ -173,6 +189,11 @@ export default function SessionLog({
       <div className="flex flex-col gap-2">
         {logEntries.map((entry, i) => (
           <div key={i}>
+            {(i === 0 || dateKey(entry.time) !== dateKey(logEntries[i - 1].time)) && (
+              <div className={`text-[11px] font-semibold text-text-3 uppercase tracking-wide mb-1.5 ${i === 0 ? "" : "mt-2"}`}>
+                {formatDate(new Date(entry.time).toISOString())}
+              </div>
+            )}
             <div className="w-full flex items-center gap-2 text-[12.5px]">
               <button
                 type="button"
@@ -236,13 +257,13 @@ export default function SessionLog({
                       </svg>
                     </button>
                   )}
-                  {onDelete && entry.kind === "disconnection" && (
+                  {onDelete && (
                     <button
                       type="button"
-                      onClick={() => handleDeleteDisconnection(entry.issueId)}
-                      disabled={deletingId === entry.issueId}
+                      onClick={() => handleDelete(i, entry)}
+                      disabled={deletingIndex === i}
                       className="text-text-3 hover:text-danger cursor-pointer disabled:opacity-50"
-                      title="Delete disconnection"
+                      title={entry.kind === "step" ? "Delete this step entry" : "Delete disconnection"}
                     >
                       <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                         <path d="M3 6h18" />

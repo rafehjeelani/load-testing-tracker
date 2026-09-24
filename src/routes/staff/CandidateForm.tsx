@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   addIssueStaff,
   deleteIssue,
+  deleteStepReport,
   getCandidateFull,
   getCandidateStepHistory,
   getEvidenceDownloadUrl,
@@ -146,6 +147,17 @@ export default function CandidateForm() {
     await load();
   }
 
+  /** Session Log's unified delete -- a step entry removes that specific
+   *  attempt's row entirely, an issue entry removes the disconnection. */
+  async function handleDeleteLogEntry(target: LogEditTarget) {
+    if (target.kind === "step") {
+      await deleteStepReport(candidateId!, target.stepId, target.attempt);
+    } else {
+      await deleteIssue(target.issueId);
+    }
+    await load();
+  }
+
   async function handleEditIssueStreams(issueId: string, disconnectedStreams: DisconnectedStream[]) {
     await updateIssueStreams(issueId, disconnectedStreams);
     await load();
@@ -282,7 +294,7 @@ export default function CandidateForm() {
           onDownloadEvidence={handleDownload}
           getPreviewUrl={getEvidenceDownloadUrl}
           onEditTime={handleSessionLogEditTime}
-          onDelete={handleDeleteIssue}
+          onDelete={handleDeleteLogEntry}
           onEditStreams={handleEditIssueStreams}
         />
 

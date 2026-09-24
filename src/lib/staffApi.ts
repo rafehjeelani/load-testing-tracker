@@ -620,6 +620,22 @@ export async function deleteIssue(issueId: string) {
   if (error) throw new StaffApiError(error.message);
 }
 
+/** Admin/moderator only -- same RLS pattern as deleteIssue, already covers
+ *  delete for step_reports. Removes one attempt's answer entirely (outcome,
+ *  comment, evidence, saved_at) -- if that's the candidate's current
+ *  attempt for this step, every "current status" view (the step's card,
+ *  funnel, step-level performance) goes back to "not yet reported" for it,
+ *  same as if it had never been answered. */
+export async function deleteStepReport(candidateId: string, stepId: string, attempt: number) {
+  const { error } = await supabase
+    .from("step_reports")
+    .delete()
+    .eq("candidate_id", candidateId)
+    .eq("step_id", stepId)
+    .eq("attempt", attempt);
+  if (error) throw new StaffApiError(error.message);
+}
+
 export async function submitFormStaff(candidateId: string) {
   const { error } = await supabase
     .from("candidates")
