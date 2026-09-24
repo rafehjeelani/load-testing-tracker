@@ -62,6 +62,11 @@ const IssuesSection = forwardRef<IssuesSectionHandle, Props>(function IssuesSect
   const [evidencePaths, setEvidencePaths] = useState<string[]>([]);
   const [disconnectedStreams, setDisconnectedStreams] = useState<DisconnectedStream[]>([]);
   const [addTimeValue, setAddTimeValue] = useState(() => toTimeInputValue(new Date().toISOString()));
+  // Only true once staff actually edits the time field -- lets handleSubmit
+  // tell "left at the default" apart from "deliberately backdated", so a
+  // slow form-fill (comment, evidence upload) doesn't silently freeze the
+  // logged time at whenever the modal happened to open.
+  const [addTimeTouched, setAddTimeTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [downloadingPath, setDownloadingPath] = useState<string | null>(null);
   const [editingTimeId, setEditingTimeId] = useState<string | null>(null);
@@ -99,6 +104,7 @@ const IssuesSection = forwardRef<IssuesSectionHandle, Props>(function IssuesSect
     setEvidencePaths([]);
     setDisconnectedStreams([]);
     setAddTimeValue(toTimeInputValue(new Date().toISOString()));
+    setAddTimeTouched(false);
   }
 
   function closeForm() {
@@ -117,10 +123,19 @@ const IssuesSection = forwardRef<IssuesSectionHandle, Props>(function IssuesSect
       // Staff can backdate a disconnection to slot it chronologically
       // between other already-logged entries -- candidates always log
       // theirs as happening right now, so this is only computed when the
-      // staff-only time field is showing. Gated on onDelete (not
-      // onEditTime), since candidates already get onEditTime for their own
-      // logged issues -- onDelete is the one prop only staff ever pass.
-      const createdAtIso = onDelete ? withTimeInputValue(new Date().toISOString(), addTimeValue) : undefined;
+      // staff-only time field is showing (gated on onDelete, not
+      // onEditTime, since candidates already get onEditTime for their own
+      // logged issues -- onDelete is the one prop only staff ever pass).
+      // Only actually overrides the time when staff touched the field:
+      // otherwise a slow form-fill (typing the comment, uploading
+      // evidence) would silently freeze the logged time at whatever it
+      // happened to be when the modal opened -- seconds always zeroed by
+      // withTimeInputValue -- instead of the real, full-precision moment
+      // this disconnection is actually being submitted, which could then
+      // sort *before* a step saved (with real second-level precision) in
+      // the gap between opening this form and clicking Add.
+      const createdAtIso =
+        onDelete && addTimeTouched ? withTimeInputValue(new Date().toISOString(), addTimeValue) : undefined;
       await onAdd(null, null, comment.trim(), evidencePaths, disconnectedStreams, createdAtIso);
       closeForm();
     } finally {
@@ -327,7 +342,10 @@ const IssuesSection = forwardRef<IssuesSectionHandle, Props>(function IssuesSect
               <input
                 type="time"
                 value={addTimeValue}
-                onChange={(e) => setAddTimeValue(e.target.value)}
+                onChange={(e) => {
+                  setAddTimeValue(e.target.value);
+                  setAddTimeTouched(true);
+                }}
                 className="px-3 py-2 border border-border rounded-[7px] bg-surface text-[13.5px] font-mono-tabular"
               />
               <div className="text-[11.5px] text-text-3 mt-1">
