@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   addIssueStaff,
+  deleteIssue,
   getCandidateFull,
   getCandidateStepHistory,
   getEvidenceDownloadUrl,
@@ -133,13 +134,19 @@ export default function CandidateForm() {
     comment: string,
     evidencePaths: string[],
     disconnectedStreams: DisconnectedStream[],
+    createdAtIso?: string,
   ) {
-    await addIssueStaff(candidateId!, stepId, customStepName, comment, evidencePaths, disconnectedStreams);
+    await addIssueStaff(candidateId!, stepId, customStepName, comment, evidencePaths, disconnectedStreams, createdAtIso);
     await load();
   }
 
   async function handleEditIssueTime(issueId: string, createdAtIso: string) {
     await updateIssueTimestamp(issueId, createdAtIso);
+    await load();
+  }
+
+  async function handleDeleteIssue(issueId: string) {
+    await deleteIssue(issueId);
     await load();
   }
 
@@ -285,6 +292,7 @@ export default function CandidateForm() {
           onDownload={handleDownload}
           getPreviewUrl={getEvidenceDownloadUrl}
           onEditTime={handleEditIssueTime}
+          onDelete={handleDeleteIssue}
         />
 
         <div className="text-[12px] text-text-3 text-center mt-2">

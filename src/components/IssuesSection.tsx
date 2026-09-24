@@ -26,14 +26,22 @@ interface Props {
     comment: string,
     evidencePaths: string[],
     disconnectedStreams: DisconnectedStream[],
+    createdAtIso?: string,
   ) => Promise<void>;
   onUpload: (file: File) => Promise<string>;
   /** When provided, a "Download" action is shown next to each logged issue's evidence, via a signed URL. */
   onDownload?: (evidencePath: string) => Promise<void>;
   /** When provided, image evidence on already-logged issues gets a thumbnail preview, via a signed URL. */
   getPreviewUrl?: (evidencePath: string) => Promise<string>;
-  /** When provided, staff can correct the "Logged at" time on an existing entry. */
+  /** When provided, lets the "Logged at" time on an existing entry be
+   *  corrected -- both the candidate's own view and staff's pass this. */
   onEditTime?: (issueId: string, newIso: string) => Promise<void>;
+  /** When provided, lets an already-logged issue be deleted, and turns on
+   *  the "When did this happen?" backdating field on the Add form -- staff
+   *  only passes this (a candidate should never remove or backdate their
+   *  own disconnection record), so it doubles as the "is staff" signal for
+   *  those two staff-only capabilities. */
+  onDelete?: (issueId: string) => Promise<void>;
   /** Hides the list of already-logged issues, keeping only the modal (still
    *  triggerable via the ref) -- used by the candidate wizard, which shows
    *  the list in Preview only instead of on every step. */
@@ -46,17 +54,19 @@ export interface IssuesSectionHandle {
 }
 
 const IssuesSection = forwardRef<IssuesSectionHandle, Props>(function IssuesSection(
-  { steps, issues, onAdd, onUpload, onDownload, getPreviewUrl, onEditTime, hideList },
+  { steps, issues, onAdd, onUpload, onDownload, getPreviewUrl, onEditTime, onDelete, hideList },
   ref,
 ) {
   const [formOpen, setFormOpen] = useState(false);
   const [comment, setComment] = useState("");
   const [evidencePaths, setEvidencePaths] = useState<string[]>([]);
   const [disconnectedStreams, setDisconnectedStreams] = useState<DisconnectedStream[]>([]);
+  const [addTimeValue, setAddTimeValue] = useState(() => toTimeInputValue(new Date().toISOString()));
   const [submitting, setSubmitting] = useState(false);
   const [downloadingPath, setDownloadingPath] = useState<string | null>(null);
   const [editingTimeId, setEditingTimeId] = useState<string | null>(null);
   const [editingTimeValue, setEditingTimeValue] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
 
   useImperativeHandle(ref, () => ({
@@ -88,6 +98,7 @@ const IssuesSection = forwardRef<IssuesSectionHandle, Props>(function IssuesSect
     setComment("");
     setEvidencePaths([]);
     setDisconnectedStreams([]);
+    setAddTimeValue(toTimeInputValue(new Date().toISOString()));
   }
 
   function closeForm() {
@@ -103,10 +114,29 @@ const IssuesSection = forwardRef<IssuesSectionHandle, Props>(function IssuesSect
     if (!canSubmit) return;
     setSubmitting(true);
     try {
-      await onAdd(null, null, comment.trim(), evidencePaths, disconnectedStreams);
+      // Staff can backdate a disconnection to slot it chronologically
+      // between other already-logged entries -- candidates always log
+      // theirs as happening right now, so this is only computed when the
+      // staff-only time field is showing. Gated on onDelete (not
+      // onEditTime), since candidates already get onEditTime for their own
+      // logged issues -- onDelete is the one prop only staff ever pass.
+      const createdAtIso = onDelete ? withTimeInputValue(new Date().toISOString(), addTimeValue) : undefined;
+      await onAdd(null, null, comment.trim(), evidencePaths, disconnectedStreams, createdAtIso);
       closeForm();
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleDelete(issue: Issue) {
+    if (!onDelete) return;
+    const ok = window.confirm("Delete this disconnection? This can't be undone.");
+    if (!ok) return;
+    setDeletingId(issue.id);
+    try {
+      await onDelete(issue.id);
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -203,6 +233,21 @@ const IssuesSection = forwardRef<IssuesSectionHandle, Props>(function IssuesSect
                     </svg>
                   </button>
                 )}
+                {onDelete && (
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(issue)}
+                    disabled={deletingId === issue.id}
+                    className="text-text-3 hover:text-danger cursor-pointer disabled:opacity-50"
+                    title="Delete disconnection"
+                  >
+                    <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <path d="M3 6h18" />
+                      <path d="M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2m2 0v14a1 1 0 01-1 1H7a1 1 0 01-1-1V6" />
+                      <path d="M10 11v6M14 11v6" />
+                    </svg>
+                  </button>
+                )}
               </span>
             )}
           </div>
@@ -276,6 +321,20 @@ const IssuesSection = forwardRef<IssuesSectionHandle, Props>(function IssuesSect
               ))}
             </div>
           </div>
+          {onDelete && (
+            <div>
+              <FieldLabel>When did this happen?</FieldLabel>
+              <input
+                type="time"
+                value={addTimeValue}
+                onChange={(e) => setAddTimeValue(e.target.value)}
+                className="px-3 py-2 border border-border rounded-[7px] bg-surface text-[13.5px] font-mono-tabular"
+              />
+              <div className="text-[11.5px] text-text-3 mt-1">
+                Defaults to now — set an earlier time to slot this in between other logged entries.
+              </div>
+            </div>
+          )}
           <div>
             <FieldLabel required>Comment</FieldLabel>
             <Textarea

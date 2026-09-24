@@ -583,6 +583,7 @@ export async function addIssueStaff(
   comment: string,
   evidencePaths: string[],
   disconnectedStreams: DisconnectedStream[],
+  createdAtIso?: string,
 ) {
   const { error } = await supabase.from("issues").insert({
     candidate_id: candidateId,
@@ -591,12 +592,26 @@ export async function addIssueStaff(
     comment,
     evidence_paths: evidencePaths,
     disconnected_streams: disconnectedStreams,
+    // Omitted -> column default (now()). Staff can backdate a disconnection
+    // to slot it chronologically between other already-logged entries.
+    ...(createdAtIso ? { created_at: createdAtIso } : {}),
   });
   if (error) throw new StaffApiError(error.message);
 }
 
 export async function updateIssueTimestamp(issueId: string, createdAtIso: string) {
   const { error } = await supabase.from("issues").update({ created_at: createdAtIso }).eq("id", issueId);
+  if (error) throw new StaffApiError(error.message);
+}
+
+/** Admin/moderator only -- RLS on `issues` already grants delete to admins
+ *  and to moderators for their own assigned candidates. Doesn't touch the
+ *  candidate's current_attempt counter: that only ever moves forward, so
+ *  deleting a mistakenly-logged disconnection removes the record without
+ *  trying to rewind attempt numbering (which could desync rows already
+ *  saved under the attempt it incremented into). */
+export async function deleteIssue(issueId: string) {
+  const { error } = await supabase.from("issues").delete().eq("id", issueId);
   if (error) throw new StaffApiError(error.message);
 }
 
