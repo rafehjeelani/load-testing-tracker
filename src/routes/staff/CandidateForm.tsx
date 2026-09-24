@@ -9,6 +9,7 @@ import {
   getNetworkCheckStep,
   listSteps,
   submitFormStaff,
+  updateIssueStreams,
   updateIssueTimestamp,
   updateStepReportSavedAt,
   upsertStepReportStaff,
@@ -145,6 +146,11 @@ export default function CandidateForm() {
     await load();
   }
 
+  async function handleEditIssueStreams(issueId: string, disconnectedStreams: DisconnectedStream[]) {
+    await updateIssueStreams(issueId, disconnectedStreams);
+    await load();
+  }
+
   /** Session Log spans every attempt, not just the current one -- unlike
    *  StaffStepRow's onEditSavedAt (always the current attempt), this targets
    *  whichever attempt the clicked entry actually came from. */
@@ -277,6 +283,7 @@ export default function CandidateForm() {
           getPreviewUrl={getEvidenceDownloadUrl}
           onEditTime={handleSessionLogEditTime}
           onDelete={handleDeleteIssue}
+          onEditStreams={handleEditIssueStreams}
         />
 
         {/* The list of already-logged issues is hidden here -- the Session

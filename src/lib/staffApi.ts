@@ -604,6 +604,11 @@ export async function updateIssueTimestamp(issueId: string, createdAtIso: string
   if (error) throw new StaffApiError(error.message);
 }
 
+export async function updateIssueStreams(issueId: string, disconnectedStreams: DisconnectedStream[]) {
+  const { error } = await supabase.from("issues").update({ disconnected_streams: disconnectedStreams }).eq("id", issueId);
+  if (error) throw new StaffApiError(error.message);
+}
+
 /** Admin/moderator only -- RLS on `issues` already grants delete to admins
  *  and to moderators for their own assigned candidates. Doesn't touch the
  *  candidate's current_attempt counter: that only ever moves forward, so

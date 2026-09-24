@@ -5,6 +5,7 @@ import { Badge } from "./ui";
 import { OUTCOME_LABEL, OUTCOME_TEXT_COLOR, formatTime, toTimeInputValue, withTimeInputValue } from "../lib/outcome";
 
 const STREAM_LABEL: Record<DisconnectedStream, string> = { primary: "Primary", screen: "Screen", secondary: "Secondary" };
+const STREAM_OPTIONS: DisconnectedStream[] = ["primary", "screen", "secondary"];
 
 /** What to correct and how, passed back through onEditTime -- a step entry
  *  names the exact attempt it came from (a step can have more than one row
@@ -26,6 +27,9 @@ interface Props {
    *  deleted this way -- only disconnections). Omitted on the candidate's
    *  own Preview. */
   onDelete?: (issueId: string) => Promise<void>;
+  /** When provided, staff can correct which stream(s) a disconnection
+   *  affected -- omitted on the candidate's own Preview. */
+  onEditStreams?: (issueId: string, streams: DisconnectedStream[]) => Promise<void>;
 }
 
 type LogEntry =
@@ -62,12 +66,24 @@ function editTargetFor(entry: LogEntry): LogEditTarget {
  *  attempt or that specific disconnection. Shared by the candidate's own
  *  Preview and the staff (admin/moderator) candidate-editing view, so both
  *  see the same history. */
-export default function SessionLog({ steps, history, issues, onDownloadEvidence, getPreviewUrl, onEditTime, onDelete }: Props) {
+export default function SessionLog({
+  steps,
+  history,
+  issues,
+  onDownloadEvidence,
+  getPreviewUrl,
+  onEditTime,
+  onDelete,
+  onEditStreams,
+}: Props) {
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingTimeValue, setEditingTimeValue] = useState("");
   const [editSaving, setEditSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [editingStreamsId, setEditingStreamsId] = useState<string | null>(null);
+  const [editingStreamsValue, setEditingStreamsValue] = useState<DisconnectedStream[]>([]);
+  const [streamsSaving, setStreamsSaving] = useState(false);
 
   const logEntries: LogEntry[] = [
     ...history
@@ -122,6 +138,26 @@ export default function SessionLog({ steps, history, issues, onDownloadEvidence,
       await onDelete(issueId);
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  function startEditStreams(entry: Extract<LogEntry, { kind: "disconnection" }>) {
+    setEditingStreamsId(entry.issueId);
+    setEditingStreamsValue(entry.disconnectedStreams);
+  }
+
+  function toggleEditingStream(key: DisconnectedStream) {
+    setEditingStreamsValue((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  }
+
+  async function saveEditStreams(issueId: string) {
+    if (!onEditStreams) return;
+    setStreamsSaving(true);
+    try {
+      await onEditStreams(issueId, editingStreamsValue);
+      setEditingStreamsId(null);
+    } finally {
+      setStreamsSaving(false);
     }
   }
 
@@ -237,15 +273,68 @@ export default function SessionLog({ steps, history, issues, onDownloadEvidence,
             </div>
             {expandedIndex === i && (
               <div className="ml-4 mt-1.5 mb-1 pl-3 border-l-2 border-border-soft flex flex-col gap-1.5">
-                {entry.kind === "disconnection" && entry.disconnectedStreams.length > 0 && (
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {entry.disconnectedStreams.map((s) => (
-                      <Badge key={s} variant="neutral">
-                        {STREAM_LABEL[s]}
-                      </Badge>
-                    ))}
-                  </div>
-                )}
+                {entry.kind === "disconnection" &&
+                  (editingStreamsId === entry.issueId ? (
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex items-center gap-3 flex-wrap text-[12.5px]">
+                        {STREAM_OPTIONS.map((key) => (
+                          <label key={key} className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={editingStreamsValue.includes(key)}
+                              onChange={() => toggleEditingStream(key)}
+                            />
+                            {STREAM_LABEL[key]}
+                          </label>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => saveEditStreams(entry.issueId)}
+                          disabled={streamsSaving}
+                          className="text-success cursor-pointer disabled:opacity-50"
+                          title="Save streams"
+                        >
+                          <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+                            <path d="M20 6L9 17l-5-5" />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingStreamsId(null)}
+                          className="text-text-3 cursor-pointer text-[13px]"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {entry.disconnectedStreams.length > 0 ? (
+                        entry.disconnectedStreams.map((s) => (
+                          <Badge key={s} variant="neutral">
+                            {STREAM_LABEL[s]}
+                          </Badge>
+                        ))
+                      ) : (
+                        <span className="text-[12.5px] text-text-3">No stream recorded.</span>
+                      )}
+                      {onEditStreams && (
+                        <button
+                          type="button"
+                          onClick={() => startEditStreams(entry)}
+                          className="text-text-3 hover:text-accent cursor-pointer"
+                          title="Edit disconnected stream(s)"
+                        >
+                          <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                            <path d="M12 20h9" />
+                            <path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  ))}
                 {entry.comment && <div className="text-[12.5px] text-text-2">{entry.comment}</div>}
                 {entry.evidencePaths.length > 0 ? (
                   <div className="flex flex-col gap-1">
